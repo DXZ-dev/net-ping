@@ -17,7 +17,12 @@ export async function render(el, app) {
       <details class="small mt"><summary>${t("Cómo crear el token")}</summary><ol><li>Proxmox → Datacenter → Permissions → API Tokens → Add.</li>
         <li>${t("Usuario")} <code>root@pam</code>, ID <code>bipon</code>. ${t("Para sólo ver: rol PVEAuditor. Para encender/apagar: PVEVMUser. Para activar TUN: desmarca «Privilege Separation».")}</li><li>${t("Copia el secreto (sólo se muestra una vez).")}</li></ol></details>
       ${px.error ? `<div class="alert err mt small">${ico("alert")}<div>${esc(px.error)}</div></div>` : ""}
-      <button class="btn primary mt">${ico("link")}${t("Conectar y sincronizar")}</button></form>
+      <button class="btn primary mt">${ico("link")}${t("Conectar y sincronizar")}</button>
+      ${px.config.secret ? `<div class="card flat mt" id="px-saved"><header><h4>${ico("lock")}${t("Token guardado")}</h4></header>
+        <dl class="kv small"><dt>Token ID</dt><dd class="mono">${esc(px.config.token_id || "")}</dd>
+          <dt>${t("Secreto")}</dt><dd><span class="mono" id="px-sec" data-notr>••••••••••••••••</span></dd></dl>
+        <div class="row mt" id="px-ask"><button type="button" class="btn sm" id="px-show">${ico("eye")}${t("Mostrar token")}</button></div>
+        <p class="small muted mt">${t("Por seguridad, para verlo hay que escribir de nuevo la contraseña de administrador. Se oculta solo a los 30 s.")}</p></div>` : ""}</form>
     <div class="card"><header><h2>${ico("home")}Home Assistant</h2></header>
       <p class="muted small mb">${t("Sensores (consultas, bloqueos, latencia, velocidad, dispositivos) e interruptores (pausar bloqueo, pausa familiar, pausar un dispositivo) para tus automatizaciones.")}</p>
       <ol class="steps small"><li>${t("Crea un token de sólo lectura en Usuarios y acceso → Tokens de API (o «Administrador» si quieres usar los interruptores).")}</li>
@@ -40,6 +45,32 @@ export async function render(el, app) {
   const pf = el.querySelector("#pxf");
   pf.onsubmit = (e) => { e.preventDefault(); busy(pf.querySelector(".primary"), () => api.put("/integrations/proxmox", { url: pf.url.value.trim(), token_id: pf.token_id.value.trim(), secret: pf.secret.value, verify_tls: pf.verify_tls.checked }))
     .then((r) => { toast(`${Object.keys(r.inventory || {}).length} ${t("VM/LXC sincronizadas")}`); app.reload(); }).catch(() => {}); };
+  const ask = el.querySelector("#px-ask");
+  if (ask) {
+    let hideTimer = null;
+    const hide = () => { el.querySelector("#px-sec").textContent = "••••••••••••••••"; ask.innerHTML = `<button type="button" class="btn sm" id="px-show">${ico("eye")}${t("Mostrar token")}</button>`; };
+    ask.addEventListener("click", async (e) => {
+      if (e.target.closest("#px-show")) {
+        ask.innerHTML = `<input type="password" id="px-pw" placeholder="${t("Contraseña de administrador")}" autocomplete="current-password" style="max-width:240px">
+          <button type="button" class="btn sm primary" id="px-ok">${ico("check")}${t("Ver")}</button><button type="button" class="btn sm ghost" id="px-cancel">${t("Cancelar")}</button>`;
+        const pw = ask.querySelector("#px-pw");
+        pw.focus();
+        pw.onkeydown = (k) => { if (k.key === "Enter") { k.preventDefault(); ask.querySelector("#px-ok").click(); } };
+      } else if (e.target.closest("#px-cancel")) {
+        hide();
+      } else if (e.target.closest("#px-ok")) {
+        const b = e.target.closest("#px-ok");
+        try {
+          const r = await busy(b, () => api.post("/integrations/proxmox/reveal", { password: ask.querySelector("#px-pw").value }));
+          el.querySelector("#px-sec").textContent = r.secret;
+          ask.innerHTML = `<button type="button" class="btn sm" id="px-copy">${ico("copy")}${t("Copiar")}</button><button type="button" class="btn sm ghost" id="px-cancel">${ico("eye")}${t("Ocultar")}</button>`;
+          ask.querySelector("#px-copy").onclick = () => copy(r.secret);
+          clearTimeout(hideTimer);
+          hideTimer = setTimeout(() => { if (document.body.contains(ask)) hide(); }, 30000);
+        } catch { /* busy() ya muestra el error */ }
+      }
+    });
+  }
   const yaml = () => api("/integrations/config/ha.yaml");
   el.querySelector("#ha-dl").onclick = async () => download("bipon-home-assistant.yaml", await yaml());
   el.querySelector("#ha-cp").onclick = async () => copy(await yaml());

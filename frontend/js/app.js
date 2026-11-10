@@ -40,6 +40,7 @@ const NAV = [
 export const session = { user: null, edition: "home", version: "" };
 let cleanup = null;
 let statusTimer = null;
+let searchReady = false;
 
 applyPrefs(loadPrefs());
 setLang(getLang());
@@ -263,6 +264,7 @@ function renderShell(version) {
       <header class="topbar">
         <button class="icon-btn menu-btn" id="menu-btn" aria-label="${t("Menú")}">${ico("menu")}</button>
         <div class="title"><h1 id="page-title"></h1><p id="page-sub"></p></div>
+        <button class="gsearch-btn" id="search-btn" title="${t("Buscar")} (Ctrl+K)">${ico("search")}<span>${t("Buscar…")}</span><kbd>Ctrl K</kbd></button>
         <div class="row" id="topbar-status"></div>
       </header>
       <main class="content" id="page"></main>
@@ -276,6 +278,8 @@ function renderShell(version) {
   $("#logout-btn").onclick = async () => { await api.post("/auth/logout"); boot(); };
   $("#tour-btn").onclick = () => import("./tour.js").then((m) => m.startTour(true));
   $("#menu-btn").onclick = () => $(".app").classList.toggle("nav-open");
+  $("#search-btn").onclick = () => import("./search.js").then((m) => m.openSearch());
+  if (!searchReady) { searchReady = true; import("./search.js").then((m) => m.initSearch(NAV, role)); }
   window.onhashchange = route;
   startTranslator();
   route();

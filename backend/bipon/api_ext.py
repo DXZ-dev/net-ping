@@ -3,6 +3,7 @@ seguridad, modo automático, tareas programadas, informes, sincronización,
 TLS, integraciones, modo router y configuración inicial."""
 from __future__ import annotations
 
+import re
 import json
 import time
 
@@ -498,6 +499,27 @@ async def proxmox_get(request: Request):
             "error": c.wifi.errors.get("Proxmox")}
 
 
+@api.post("/integrations/proxmox/reveal")
+async def proxmox_reveal(request: Request, body: dict = Body(...)):
+    """Muestra el token guardado de Proxmox. Exige volver a escribir la contraseña de un administrador
+    (sólo con sesión iniciada: los tokens de API no pueden leerlo)."""
+    from . import auth
+    c = ctx(request)
+    user = request.state.user
+    ip = request.client.host if request.client else ""
+    if user.get("role") != "admin" or request.headers.get("authorization", "").lower().startswith("bearer"):
+        raise HTTPException(403, "Sólo un administrador con sesión iniciada puede ver el token")
+    auth.throttle(ip)
+    full = auth.get_user(uid=user.get("id")) if user.get("id") is not None else auth.get_user(username=user.get("username"))
+    if not full or not auth.verify_password(str(body.get("password", "")), full["password_hash"]):
+        auth.record_failure(ip)
+        c.db.event("warning", "seguridad", f"Contraseña incorrecta al intentar ver el token de Proxmox ({user.get('username')}, {ip})")
+        raise HTTPException(401, "Contraseña incorrecta")
+    pc = (c.settings.get("integrations") or {}).get("proxmox") or {}
+    c.db.event("info", "seguridad", f"{user.get('username')} vio el token de Proxmox desde {ip}")
+    return {"token_id": pc.get("token_id") or "", "secret": pc.get("secret") or "", "url": pc.get("url") or ""}
+
+
 @api.put("/integrations/proxmox")
 async def proxmox_put(request: Request, body: dict = Body(...)):
     c = ctx(request)
@@ -508,6 +530,16 @@ async def proxmox_put(request: Request, body: dict = Body(...)):
     new = {k: body.get(k, old.get(k)) for k in ("url", "token_id", "secret", "verify_tls")}
     if new.get("secret") in (None, "", "••••••"):
         new["secret"] = old.get("secret")
+    new["token_id"] = str(new.get("token_id") or "").strip()
+    new["secret"] = str(new.get("secret") or "").strip()
+    if new.get("url"):
+        if "np_" in new["token_id"] or str(new["secret"]).startswith("np_"):
+            raise HTTPException(400, "Eso es un token de Bipon (np_…), no de Proxmox. Token ID debe ser como root@pam!bipon y el "
+                                     "Secreto el código que muestra Proxmox al crear el token (formato xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx).")
+        if not re.match(r"^[\w.-]+@[\w.-]+![\w.-]+$", new["token_id"]):
+            raise HTTPException(400, "Token ID no válido: debe ser usuario@realm!nombre, por ejemplo root@pam!bipon")
+        if not re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", new["secret"]):
+            raise HTTPException(400, "El Secreto de Proxmox tiene el formato xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (se muestra una sola vez al crear el token)")
     integ["proxmox"] = new
     c.settings.set("integrations", integ, notify=False)
     if not new.get("url"):
@@ -515,7 +547,17 @@ async def proxmox_put(request: Request, body: dict = Body(...)):
     try:
         return {"inventory": await c.wifi.sync_proxmox()}
     except Exception as exc:
-        _bad(exc)
+        msg = str(exc)
+        if "CERTIFICATE_VERIFY_FAILED" in msg or "certificate verify failed" in msg:
+            msg = "Proxmox usa un certificado autofirmado: desactiva «Verificar certificado» y vuelve a conectar."
+        elif "401" in msg:
+            msg = "Proxmox rechazó el token (HTTP 401): revisa el Token ID (root@pam!bipon) y el Secreto."
+        elif "403" in msg:
+            msg = "El token no tiene permisos (HTTP 403): desmarca «Privilege Separation» o dale el rol PVEAuditor en Datacenter → Permissions."
+        elif "ConnectError" in type(exc).__name__ or "connect" in msg.lower() or "timed out" in msg.lower():
+            msg = f"No se pudo conectar con {new['url']}: revisa la IP y que el puerto 8006 esté accesible." + (f" ({msg[:120]})" if msg else "")
+        c.wifi.errors["Proxmox"] = msg
+        raise HTTPException(400, msg)
 
 
 @api.post("/router/shaping")

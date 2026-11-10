@@ -454,3 +454,23 @@ input, select { height: 38px; border-radius: var(--r-ctl); } textarea { border-r
 #tour .tour-pop { position: fixed; pointer-events: auto; background: color-mix(in srgb, var(--bg) 80%, transparent); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5); transition: all .25s ease; }
 :root[data-theme="light"] #tour .tour-pop { background: rgba(255,255,255,.92); }
+
+/* ---------- buscador global ---------- */
+.gsearch-btn { display: flex; align-items: center; gap: 8px; margin-left: auto; margin-right: 12px; padding: 7px 10px 7px 12px; min-width: 220px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--card); color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.gsearch-btn:hover { color: var(--text); border-color: var(--accent); }
+.gsearch-btn svg { width: 16px; height: 16px; }
+.gsearch-btn span { flex: 1; text-align: left; }
+.gsearch-btn kbd, .gsearch kbd { font: 11px ui-monospace, monospace; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--border); color: var(--muted); }
+@media (max-width: 760px) { .gsearch-btn { min-width: 0; padding: 7px; } .gsearch-btn span, .gsearch-btn kbd { display: none; } }
+.gsearch-backdrop { position: fixed; inset: 0; z-index: 1200; background: rgba(2,6,23,.55); backdrop-filter: blur(4px); display: flex; justify-content: center; align-items: flex-start; padding: 12vh 16px 16px; }
+.gsearch { width: min(620px, 100%); background: var(--bg); background-image: linear-gradient(var(--card), var(--card)); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.45); overflow: hidden; }
+.gsearch-in { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.gsearch-in svg { width: 18px; height: 18px; color: var(--muted); }
+.gsearch-in input { flex: 1; border: 0 !important; background: transparent !important; box-shadow: none !important; font-size: 16px; color: var(--text); outline: none; padding: 4px 0; }
+.gsearch-list { max-height: 55vh; overflow: auto; padding: 6px; }
+.gs-item { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.gs-item.sel, .gs-item:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.gs-p { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.card.flash { animation: gs-flash 2s ease; }
+@keyframes gs-flash { 0%, 60% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: none; } }

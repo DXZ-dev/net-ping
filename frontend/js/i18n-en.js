@@ -1462,7 +1462,18 @@ export const EN = {
   "¿Por qué algunos equipos muestran «—»?": "Why do some devices show «—»?",
   "Bipon sólo puede medir el tráfico que pasa por él. Ahora mide en vivo: el propio Bipon": "Bipon can only measure traffic that goes through it. It's measuring live: Bipon itself",
   ", las VMs y contenedores de Proxmox": ", the Proxmox VMs and containers",
-  " y el total de la línea. Para medir cada móvil, TV o PC, activa el modo router (Bipon como puerta de enlace) en «Modo router y firewall».": " and the line total. To measure every phone, TV or PC, enable router mode (Bipon as gateway) in «Router mode & firewall»."
+  " y el total de la línea. Para medir cada móvil, TV o PC, activa el modo router (Bipon como puerta de enlace) en «Modo router y firewall».": " and the line total. To measure every phone, TV or PC, enable router mode (Bipon as gateway) in «Router mode & firewall».",
+  "Token guardado": "Saved token",
+  "Mostrar token": "Show token",
+  "Por seguridad, para verlo hay que escribir de nuevo la contraseña de administrador. Se oculta solo a los 30 s.": "For security, you must enter the administrator password again to see it. It hides itself after 30 s.",
+  "Contraseña de administrador": "Administrator password",
+  "Ver": "View",
+  "Ocultar": "Hide",
+  "Contraseña incorrecta": "Incorrect password",
+  "Sólo un administrador con sesión iniciada puede ver el token": "Only a signed-in administrator can view the token",
+  "Buscar": "Search",
+  "Buscar…": "Search…",
+  "Buscar opciones, páginas o ajustes…": "Search options, pages or settings…"
 };
 
 export const EN_PATTERNS = [
