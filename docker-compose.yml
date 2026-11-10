@@ -1,0 +1,57 @@
+# NetPing — despliegue con Docker Compose
+#
+#   cp .env.example .env      # ajusta zona horaria y contraseña
+#   docker compose up -d --build
+#   abre http://IP-DEL-SERVIDOR:8080
+#
+# Servicios opcionales (perfiles):
+#   docker compose --profile cloudflared up -d   # Cloudflare Tunnel (publicar paneles sin abrir puertos / CGNAT)
+#   docker compose --profile ddns up -d          # DNS dinámico con DuckDNS
+
+services:
+  netping:
+    build: .
+    image: netping:latest
+    container_name: netping
+    # Red del host: necesaria para ver los dispositivos de la LAN (ARP), servir DNS
+    # en el puerto 53 de la IP real, Wake-on-LAN, UPnP y VPN.
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN        # VPN (wg-quick, OpenVPN, Tailscale), iptables, QoS
+      - NET_RAW          # ping / traceroute
+      - NET_BIND_SERVICE # puerto 53
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: ${TZ:-UTC}
+      NETPING_PASSWORD: ${NETPING_PASSWORD:-}
+      NETPING_WEB_PORT: ${NETPING_WEB_PORT:-8080}
+      NETPING_DNS_PORT: ${NETPING_DNS_PORT:-53}
+      NETPING_LOG_LEVEL: ${NETPING_LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/data
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: netping-cloudflared
+    profiles: ["cloudflared"]
+    network_mode: host
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Define CLOUDFLARE_TUNNEL_TOKEN en .env}
+
+  duckdns:
+    image: lscr.io/linuxserver/duckdns:latest
+    container_name: netping-duckdns
+    profiles: ["ddns"]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      SUBDOMAINS: ${DUCKDNS_SUBDOMAINS:?Define DUCKDNS_SUBDOMAINS en .env}
+      TOKEN: ${DUCKDNS_TOKEN:?Define DUCKDNS_TOKEN en .env}
+      LOG_FILE: "false"
