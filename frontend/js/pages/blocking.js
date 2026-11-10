@@ -1,4 +1,5 @@
 import { api, esc, ico, num, ago, toast, toastErr, busy, modal, on, toggle, confirmDialog, empty, fresh, $, $$ } from "../lib.js";
+import { appIcon } from "../brands.js";
 
 export const title = "Bloqueo";
 export const subtitle = "Listas de bloqueo, reglas propias y aplicaciones";
@@ -107,7 +108,7 @@ export async function render(el) {
     pane = fresh(pane);
     const blocked = new Set(services.filter((s) => s.blocked).map((s) => s.id));
     const cats = [...new Set(services.map((s) => s.category))];
-    const letter = (s) => `<span class="letter" style="background:hsl(${[...s.id].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 45%)">${esc(s.name[0])}</span>`;
+    const letter = (s) => appIcon(s.id, s.name);
     pane.innerHTML = `<div class="card"><header><h2>Bloquear aplicaciones en toda la red</h2><span class="badge err" id="cnt">${blocked.size} bloqueadas</span></header>
       <p class="muted small mb">Para bloquear apps sólo en algunos dispositivos (p. ej. los de los niños) usa <a href="#/parental">Control parental</a>.</p>
       ${cats.map((c) => `<h4 class="mb mt">${esc(c)}</h4><div class="svc-grid">${services.filter((s) => s.category === c).map((s) =>

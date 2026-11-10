@@ -7,7 +7,7 @@ export async function render(el, app) {
   const d = await api.get("/unbound");
   const st = d.status, s = d.settings, x = d.stats || {};
   if (!st.available) {
-    el.innerHTML = `<div class="alert warn">${ico("alert")}<div><b>Unbound no está instalado</b><p class="small">La imagen Docker y el instalador lo incluyen. En una instalación manual: <code>apt install unbound</code> y reinicia NetPing.</p></div></div>`;
+    el.innerHTML = `<div class="alert warn">${ico("alert")}<div><b>Unbound no está instalado</b><p class="small">La imagen Docker y el instalador lo incluyen. En una instalación manual: <code>apt install unbound</code> y reinicia Bipon Net.</p></div></div>`;
     return;
   }
   el.innerHTML = `

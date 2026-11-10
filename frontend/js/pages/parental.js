@@ -1,4 +1,6 @@
 import { api, esc, ico, toast, toastErr, busy, modal, on, toggle, confirmDialog, $, $$ } from "../lib.js";
+import { t } from "../i18n.js";
+import { appIcon } from "../brands.js";
 
 export const title = "Control parental";
 export const subtitle = "Perfiles por dispositivo: horarios, apps, búsqueda segura y contenido";
@@ -16,7 +18,41 @@ const TEMPLATES = [
 export async function render(el) {
   let services = [];
   el.innerHTML = `<div class="row mb"><p class="muted grow">Asigna un perfil a cada dispositivo desde <a href="#/devices">Dispositivos</a>. Las reglas del perfil se aplican aunque pauses el bloqueo de anuncios.</p>
-    <button class="btn primary" id="new">${ico("plus")}Nuevo perfil</button></div><div class="grid g-auto" id="profiles"></div>`;
+    <button class="btn danger" id="fam-pause">${ico("pause")}Pausa familiar</button><button class="btn success" id="fam-resume">${ico("play")}Reanudar a todos</button>
+    <button class="btn primary" id="new">${ico("plus")}Nuevo perfil</button></div><div class="grid g-auto" id="profiles"></div>
+    <div class="card mt"><header><h2>${ico("clock")}Tiempo de pantalla de hoy</h2><span class="small muted">Estimado por la actividad de red de cada dispositivo</span></header><div id="st"></div></div>`;
+
+  el.querySelector("#fam-pause").onclick = () => {
+    const m = modal({ title: "Pausa familiar", body: `<p class="muted small">Corta Internet al instante en todos los dispositivos (o sólo en algunos perfiles). Servidores y router quedan fuera.</p>
+      <div class="chips mt mb" id="fp">${(el._profiles || []).map((p) => `<span class="chip sel" data-p="${esc(p.id)}">${esc(p.name)}</span>`).join("")}</div>
+      <div class="grid g4">${[[15, "15 min"], [30, "30 min"], [60, "1 h"], [0, "Hasta reanudar"]].map(([v, l]) => `<button class="btn" data-min="${v}">${l}</button>`).join("")}</div>` });
+    on(m.body, "click", "[data-p]", (e, c) => c.classList.toggle("sel"));
+    on(m.body, "click", "[data-min]", async (e, b) => {
+      const profs = $$("[data-p].sel", m.body).map((x) => x.dataset.p);
+      try { const r = await api.post("/family/pause", { minutes: Number(b.dataset.min), profiles: profs.length === (el._profiles || []).length ? null : profs }); toast(`Internet pausado en ${r.devices} dispositivos`, "info"); m.close(); }
+      catch (err) { toastErr(err); }
+    });
+  };
+  el.querySelector("#fam-resume").onclick = async () => { try { const r = await api.post("/family/resume", {}); toast(`Internet reanudado en ${r.devices} dispositivos`); } catch (e) { toastErr(e); } };
+
+  async function loadScreen() {
+    const r = await api.get("/screentime").catch(() => ({ devices: [] }));
+    const box = el.querySelector("#st");
+    if (!r.devices.length) { box.innerHTML = `<p class="muted small">Sin actividad todavía hoy. Configura límites diarios en cada perfil (pestaña «Tiempo de pantalla»).</p>`; return; }
+    box.innerHTML = `<div class="grid g2">${r.devices.map((d) => `<div class="rec"><div class="row between"><b>${esc(d.name)}</b><span class="badge">${esc(d.profile || "")}</span></div>
+      <div class="col mt">${d.apps.slice(0, 8).map((a) => {
+        const lim = a.limit ? a.limit + (a.bonus || 0) : null;
+        const pctv = lim ? Math.min(100, (a.minutes / lim) * 100) : null;
+        return `<div><div class="row small" style="flex-wrap:nowrap">${a.service === r.all_key ? `<span class="brand-ic" style="background:var(--card-2);color:var(--text)">${ico("globe")}</span>` : appIcon(a.service, a.name)}
+          <span class="grow">${esc(a.name)}</span><b>${a.minutes} min</b>${lim ? `<span class="muted"> / ${lim}</span>` : ""}
+          ${a.limit ? `<button class="btn sm" data-bonus="${esc(d.mac)}|${esc(a.service)}" title="Dar 15 minutos más">+15</button>` : ""}</div>
+          ${lim ? `<div class="progress mt" style="height:5px"><i style="width:${pctv}%;${pctv >= 100 ? "background:var(--err)" : pctv > 80 ? "background:var(--warn)" : ""}"></i></div>` : ""}</div>`;
+      }).join("")}</div></div>`).join("")}</div>`;
+    on(box, "click", "[data-bonus]", async (e, b) => {
+      const [mac, svc] = b.dataset.bonus.split("|");
+      try { await api.post(`/screentime/${encodeURIComponent(mac)}/bonus`, { service: svc, minutes: 15 }); toast("15 minutos extra concedidos"); loadScreen(); } catch (err) { toastErr(err); }
+    });
+  }
 
   async function load() {
     const [profiles, svc] = await Promise.all([api.get("/profiles"), services.length ? { services } : api.get("/services")]);
@@ -31,12 +67,13 @@ export async function render(el) {
           ${p.adult_filter ? `<span class="badge warn">Adultos</span>` : ""}${p.safesearch ? `<span class="badge violet">SafeSearch</span>` : ""}
           ${p.youtube_restricted ? `<span class="badge violet">YouTube restringido</span>` : ""}
         </div>
-        <p class="small muted">${p.blocked_services.length ? `${ico("x")} ${p.blocked_services.length} apps bloqueadas: ${esc(p.blocked_services.slice(0, 5).map((id) => services.find((s) => s.id === id)?.name || id).join(", "))}${p.blocked_services.length > 5 ? "…" : ""}` : "Sin apps bloqueadas"}</p>
+        <p class="small muted">${p.blocked_services.length ? `${ico("x")} ${p.blocked_services.length} apps bloqueadas: ${esc(p.blocked_services.slice(0, 5).map((id) => t(services.find((s) => s.id === id)?.name || id)).join(", "))}${p.blocked_services.length > 5 ? "…" : ""}` : "Sin apps bloqueadas"}</p>
         <p class="small muted">${sch.length ? `${ico("clock")} ${sch.map((s) => `${esc(s.label || "Horario")} ${s.start}–${s.end}`).join(" · ")}` : "Sin horarios"}</p>
         <div class="row mt"><button class="btn sm" data-edit="${esc(p.id)}">${ico("edit")}Editar</button>
           ${p.id !== "default" ? `<button class="btn sm ghost" data-del="${esc(p.id)}">${ico("trash")}</button>` : ""}</div></div>`;
     }).join("");
     el._profiles = profiles;
+    loadScreen();
   }
 
   el.querySelector("#new").onclick = () => {
@@ -61,9 +98,9 @@ export async function render(el) {
   function edit(id) {
     const p = structuredClone(el._profiles.find((x) => x.id === id));
     const cats = [...new Set(services.map((s) => s.category))];
-    const letter = (s) => `<span class="letter" style="background:hsl(${[...s.id].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 45%)">${esc(s.name[0])}</span>`;
+    const letter = (s) => appIcon(s.id, s.name);
     const m = modal({ title: `Perfil: ${p.name}`, wide: true, body: `
-      <div class="tabs"><button class="active" data-tab="general">General</button><button data-tab="apps">Apps bloqueadas</button><button data-tab="sched">Horarios</button></div>
+      <div class="tabs"><button class="active" data-tab="general">General</button><button data-tab="apps">Apps bloqueadas</button><button data-tab="sched">Horarios</button><button data-tab="limits">Tiempo de pantalla</button></div>
       <div data-pane="general">
         <div class="form-grid mb"><label class="field">Nombre<input name="name" value="${esc(p.name)}"></label><label class="field">Color<input type="color" name="color" value="${esc(p.color)}" style="height:40px;padding:4px"></label></div>
         ${opt("block_all", "Bloquear todo Internet", "Corta Internet a todos los dispositivos de este perfil.", p.block_all)}
@@ -78,13 +115,20 @@ export async function render(el) {
         ${cats.map((c) => `<h4 class="mb mt">${esc(c)}</h4><div class="svc-grid">${services.filter((s) => s.category === c).map((s) =>
           `<div class="svc ${p.blocked_services.includes(s.id) ? "on" : ""}" data-svc="${s.id}">${letter(s)}<span class="grow">${esc(s.name)}</span></div>`).join("")}</div>`).join("")}
       </div>
+      <div data-pane="limits" class="hidden">
+        <p class="muted small mb">Minutos diarios permitidos (vacío = sin límite). Al agotarse, la app o Internet se bloquean hasta medianoche; puedes dar tiempo extra desde aquí o desde el móvil.</p>
+        <div class="opt"><div class="t"><b>Internet en total</b><span>Todas las apps y webs</span></div><input type="number" min="0" data-limit="__internet__" value="${esc((p.limits || {}).__internet__ || "")}" placeholder="∞" style="width:100px"> min</div>
+        <div class="svc-grid mt">${services.map((x) => `<label class="svc" style="cursor:default">${appIcon(x.id, x.name)}<span class="grow">${esc(x.name)}</span><input type="number" min="0" data-limit="${x.id}" value="${esc((p.limits || {})[x.id] || "")}" placeholder="∞" style="width:74px;height:30px"></label>`).join("")}</div>
+      </div>
       <div data-pane="sched" class="hidden">
         <p class="muted small mb">Define franjas horarias. Pueden cruzar la medianoche (p. ej. 22:00–07:00).</p>
         <div id="sched-list" class="col"></div>
         <button class="btn sm mt" id="add-sched">${ico("plus")}Añadir horario</button>
       </div>`,
       actions: [{ label: "Cancelar" }, { label: "Guardar", kind: "primary", onClick: async (mm) => {
-        const body = { name: $("[name=name]", mm).value, color: $("[name=color]", mm).value, blocked_services: p.blocked_services, schedules: readSched(mm) };
+        const limits = {};
+        $$("[data-limit]", mm).forEach((i) => { if (Number(i.value) > 0) limits[i.dataset.limit] = Number(i.value); });
+        const body = { name: $("[name=name]", mm).value, color: $("[name=color]", mm).value, blocked_services: p.blocked_services, schedules: readSched(mm), limits };
         for (const k of ["block_all", "filtering", "threat_protection", "adult_filter", "safesearch", "youtube_restricted"]) body[k] = $(`[name=${k}]`, mm).checked;
         await api.put(`/profiles/${id}`, body);
         toast("Perfil guardado"); load();

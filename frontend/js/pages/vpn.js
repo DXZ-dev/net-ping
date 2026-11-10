@@ -12,6 +12,7 @@ export async function render(el) {
     <div id="vpn-warn"></div><div id="pane"></div>`;
   let pane = el.querySelector("#pane");
   let timer;
+  let pkgs = { tools: {}, jobs: {} };
   on(el, "click", "[data-tab]", (e, b) => { tab = b.dataset.tab; try { sessionStorage.setItem("np-vpn-tab", tab); } catch {} show(); });
 
   async function show() {
@@ -19,8 +20,23 @@ export async function render(el) {
     $$("[data-tab]", el).forEach((x) => x.classList.toggle("active", x.dataset.tab === tab));
     const ov = await api.get("/vpn");
     pane = fresh(pane);
-    el.querySelector("#vpn-warn").innerHTML = !ov.tun || !ov.net_admin ? `<div class="alert warn mb">${ico("alert")}<div><b>Permisos de red limitados</b>
-      <p class="small">${!ov.tun ? "No existe /dev/net/tun. " : ""}${!ov.net_admin ? "Falta la capacidad NET_ADMIN. " : ""}En Docker añade <code>cap_add: [NET_ADMIN]</code> y <code>devices: [/dev/net/tun]</code> (ya incluidos en el docker-compose.yml). En Proxmox LXC activa «TUN» en el contenedor.</p></div></div>` : "";
+    pkgs = await api.get("/packages").catch(() => ({ tools: {}, jobs: {} }));
+    const me = !ov.tun && pkgs.container === "lxc" ? await api.get("/packages/self").catch(() => ({})) : {};
+    const id = me.vmid || "ID";
+    el.querySelector("#vpn-warn").innerHTML = !ov.tun || !ov.net_admin ? `<div class="alert warn mb">${ico("alert")}<div class="grow"><b>Permisos de red limitados</b>
+      <p class="small">${!ov.tun ? "Este equipo no tiene /dev/net/tun: WireGuard y OpenVPN no pueden crear interfaces. <b>Tailscale sí funciona</b> (Bipon lo arranca en modo userspace). " : ""}${!ov.net_admin ? "Falta la capacidad NET_ADMIN. " : ""}</p>
+      ${pkgs.container === "lxc" ? `<div class="row mt"><button class="btn sm primary" id="tun-auto">${ico("zap")}Activar TUN automáticamente</button>
+          <span class="small muted">Usa la integración con Proxmox (token de root@pam) y reinicia este contenedor.</span></div>
+        <p class="small mt">O ejecuta en la shell del <b>host Proxmox</b>${me.vmid ? "" : " (cambia ID por el número de este contenedor, «" + esc(pkgs.hostname || "") + "»)"}:</p>
+        <pre data-notr>pct set ${id} -dev0 /dev/net/tun && pct reboot ${id}</pre>
+        <p class="small muted">Proxmox 7 o anterior: añade a /etc/pve/lxc/${id}.conf las líneas <code>lxc.cgroup2.devices.allow: c 10:200 rwm</code> y <code>lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file</code> y reinicia el contenedor.</p>`
+      : `<p class="small">En Docker añade <code>cap_add: [NET_ADMIN]</code> y <code>devices: [/dev/net/tun]</code> (ya incluidos en el docker-compose.yml).</p>`}</div></div>` : "";
+    const ta = el.querySelector("#tun-auto");
+    if (ta) ta.onclick = () => busy(ta, async () => {
+      if (!(await confirmDialog("Activar TUN", "Bipon modificará su contenedor en Proxmox y se reiniciará (≈30 s sin servicio).", { danger: false, label: "Activar y reiniciar" }))) return;
+      const r = await api.post("/packages/enable-tun");
+      toast(r.message, "info", 10000);
+    }).catch(() => {});
     if (tab === "wireguard") return wireguard(ov.wireguard);
     if (tab === "openvpn") return openvpn(ov.openvpn);
     if (tab === "tailscale") return tailscale(ov.tailscale);
@@ -32,7 +48,7 @@ export async function render(el) {
   // =============================================================== WireGuard
   function wireguard(w) {
     pane = fresh(pane);
-    if (!w.available) { pane.innerHTML = notInstalled("WireGuard", "wireguard-tools"); return; }
+    if (!w.available) { pane.innerHTML = notInstalled("WireGuard", "wireguard"); bindInstall(); return; }
     pane.innerHTML = `
       <div class="row mb"><p class="muted grow small">El protocolo VPN más rápido y con menor latencia. Crea un servidor para entrar a tu red desde fuera, o importa un túnel de tu proveedor VPN.</p>
         <button class="btn" id="wg-import">${ico("upload")}Importar túnel</button><button class="btn primary" id="wg-new">${ico("plus")}Nuevo servidor</button></div>
@@ -63,7 +79,7 @@ export async function render(el) {
       <div class="form-grid mb"><label class="field">Nombre<input name="name" value="wg-vpn"></label></div>
       <label class="field">Configuración<textarea name="conf" rows="10" placeholder="[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nEndpoint = …\nAllowedIPs = 0.0.0.0/0"></textarea></label>
       <input type="file" accept=".conf" class="mt" id="wgfile">
-      <div class="alert warn mt">${ico("alert")}<div class="small">Si el túnel usa <code>AllowedIPs = 0.0.0.0/0</code>, todo el tráfico del servidor NetPing (incluido el DNS hacia Internet) saldrá por la VPN.</div></div>`,
+      <div class="alert warn mt">${ico("alert")}<div class="small">Si el túnel usa <code>AllowedIPs = 0.0.0.0/0</code>, todo el tráfico del servidor Bipon Net (incluido el DNS hacia Internet) saldrá por la VPN.</div></div>`,
       actions: [{ label: "Cancelar" }, { label: "Importar", kind: "primary", onClick: async (m) => {
         await api.post("/vpn/wireguard/import", { name: $("[name=name]", m).value, config: $("[name=conf]", m).value });
         toast("Túnel importado"); refresh();
@@ -112,7 +128,7 @@ export async function render(el) {
   function editServer(s) {
     modal({ title: `Servidor ${s.name}`, body: `<div class="form-grid">
       <label class="field">Endpoint público<input name="endpoint" value="${esc(s.endpoint)}"></label><label class="field">Puerto<input type="number" name="port" value="${s.port}"></label>
-      <label class="field">DNS para clientes<input name="dns" value="${esc(s.dns)}"><small>La IP de NetPing = bloqueo de anuncios fuera de casa.</small></label>
+      <label class="field">DNS para clientes<input name="dns" value="${esc(s.dns)}"><small>La IP de Bipon Net = bloqueo de anuncios fuera de casa.</small></label>
       <label class="field">Red LAN<input name="lan_net" value="${esc(s.lan_net)}"></label><label class="field">MTU<input type="number" name="mtu" value="${s.mtu}"></label>
       <label class="field">Keepalive (s)<input type="number" name="keepalive" value="${s.keepalive}"><small>25 s mantiene el túnel vivo tras NAT/CGNAT.</small></label></div>
       <div class="opt"><div class="t"><b>Túnel completo</b></div>${toggle("full_tunnel", s.full_tunnel)}</div><div class="opt"><div class="t"><b>Arranque automático</b></div>${toggle("autostart", s.autostart)}</div>`,
@@ -136,7 +152,7 @@ export async function render(el) {
   // =============================================================== OpenVPN
   function openvpn(o) {
     pane = fresh(pane);
-    if (!o.available) { pane.innerHTML = notInstalled("OpenVPN", "openvpn"); return; }
+    if (!o.available) { pane.innerHTML = notInstalled("OpenVPN", "openvpn"); bindInstall(); return; }
     const s = o.server;
     pane.innerHTML = `
       <div class="grid g3">
@@ -159,14 +175,14 @@ export async function render(el) {
           <td>${p.connected ? `<span class="badge ok">conectado</span>` : p.running ? `<span class="badge warn">conectando…</span>` : `<span class="badge">desconectado</span>`}</td>
           <td class="small mono muted truncate" style="max-width:380px">${esc((p.log || []).slice(-1)[0] || "")}</td>
           <td class="actions">${p.running ? `<button class="btn sm" data-ovp="${esc(p.name)}" data-act="disconnect">Desconectar</button>` : `<button class="btn sm success" data-ovp="${esc(p.name)}" data-act="connect">Conectar</button>`}
-          <button class="icon-btn" data-ovp="${esc(p.name)}" data-act="delete">${ico("trash")}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="muted small">Importa el .ovpn de tu proveedor o de tu trabajo para conectar NetPing a esa VPN.</p>`}</div>`;
+          <button class="icon-btn" data-ovp="${esc(p.name)}" data-act="delete">${ico("trash")}</button></td></tr>`).join("")}</tbody></table></div>` : `<p class="muted small">Importa el .ovpn de tu proveedor o de tu trabajo para conectar Bipon Net a esa VPN.</p>`}</div>`;
 
     pane.querySelector("#ov-init").onclick = () => modal({ title: s ? "Configurar servidor OpenVPN" : "Crear servidor OpenVPN", body: `<div class="form-grid">
         <label class="field">Protocolo<select name="proto"><option value="udp" ${s?.proto !== "tcp" ? "selected" : ""}>UDP (más rápido)</option><option value="tcp" ${s?.proto === "tcp" ? "selected" : ""}>TCP (atraviesa firewalls)</option></select></label>
         <label class="field">Puerto<input type="number" name="port" value="${s?.port || 1194}"></label>
         <label class="field">Red del túnel<input name="network" value="${esc(s?.network || "10.9.0.0/24")}"></label>
         <label class="field">Endpoint público<input name="endpoint" value="${esc(s?.endpoint || "")}" placeholder="IP o dominio"></label>
-        <label class="field">DNS para clientes<input name="dns" value="${esc(s?.dns || "")}" placeholder="IP de NetPing"></label></div>
+        <label class="field">DNS para clientes<input name="dns" value="${esc(s?.dns || "")}" placeholder="IP de Bipon Net"></label></div>
         <div class="opt"><div class="t"><b>Túnel completo</b><span>Todo el tráfico por casa.</span></div>${toggle("full", s ? s.full_tunnel : true)}</div>
         <div class="opt"><div class="t"><b>Permitir comunicación entre clientes</b></div>${toggle("c2c", s?.client_to_client)}</div>`,
       actions: [{ label: "Cancelar" }, { label: "Guardar", kind: "primary", onClick: async (m) => {
@@ -197,29 +213,29 @@ export async function render(el) {
   // =============================================================== Tailscale
   function tailscale(t) {
     pane = fresh(pane);
-    if (!t.available) { pane.innerHTML = notInstalled("Tailscale", "tailscale (https://tailscale.com/download/linux)"); return; }
+    if (!t.available) { pane.innerHTML = notInstalled("Tailscale", "tailscale"); bindInstall(); return; }
     const p = t.prefs || {};
     const running = t.state === "Running";
     pane.innerHTML = `
       <div class="grid g3">
         <div class="card span2"><header><h2>${ico("network")}Tailscale ${running ? `<span class="badge ok">conectado</span>` : `<span class="badge">${esc(t.state || (t.daemon ? "desconectado" : "detenido"))}</span>`}</h2>
           ${running ? `<button class="btn sm" data-ts="down">${ico("power")}Desconectar</button><button class="btn sm danger" data-ts="logout">Cerrar sesión</button>` : ""}</header>
-          <p class="muted small">Red privada mallada sobre WireGuard: conecta tus dispositivos <b>aunque estés detrás de CGNAT</b> y sin abrir puertos. Activa «Anunciar mi LAN» para llegar a todos los equipos de casa y usa NetPing como DNS de tu tailnet para tener bloqueo de anuncios en todas partes.</p>
+          <p class="muted small">Red privada mallada sobre WireGuard: conecta tus dispositivos <b>aunque estés detrás de CGNAT</b> y sin abrir puertos. Activa «Anunciar mi LAN» para llegar a todos los equipos de casa y usa Bipon Net como DNS de tu tailnet para tener bloqueo de anuncios en todas partes.</p>
           ${t.login_url ? `<div class="alert info mt">${ico("key")}<div><b>Inicia sesión para autorizar este equipo</b><p class="small"><a href="${esc(t.login_url)}" target="_blank" rel="noopener">${esc(t.login_url)}</a></p></div></div>` : ""}
           ${(t.health || []).map((h) => `<div class="alert warn mt small">${ico("alert")}<div>${esc(h)}</div></div>`).join("")}
           ${running ? `<dl class="kv mt"><dt>Este equipo</dt><dd>${esc(t.self?.name)} · ${esc((t.self?.ips || []).join(", "))}</dd><dt>Tailnet</dt><dd>${esc(t.tailnet || "")} · MagicDNS ${esc(t.magic_dns || "")}</dd><dt>Versión</dt><dd>${esc(t.version || "")}${t.userspace ? " · modo userspace" : ""}</dd></dl>` : ""}
           <form id="tsf" class="mt">
-            <div class="form-grid"><label class="field">Hostname<input name="hostname" value="${esc(p.hostname || "netping")}"></label>
+            <div class="form-grid"><label class="field">Hostname<input name="hostname" value="${esc(p.hostname || "bipon")}"></label>
               <label class="field">Rutas a anunciar (LAN)<input name="routes" value="${esc((p.advertise_routes || []).join(", "))}"></label>
               <label class="field">Usar exit node<input name="exit_node" value="${esc(p.exit_node || "")}" placeholder="IP o nombre (vacío = ninguno)"></label>
               <label class="field">Servidor de control (Headscale)<input name="login_server" value="${esc(p.login_server || "")}" placeholder="vacío = Tailscale oficial"></label></div>
             ${o2("advertise_exit_node", "Ofrecer este equipo como exit node", "Tus dispositivos pueden salir a Internet por casa (bloqueo de anuncios y tu IP de casa en cualquier Wi-Fi).", p.advertise_exit_node)}
             ${o2("accept_routes", "Aceptar rutas de otros nodos", "", p.accept_routes)}
-            ${o2("accept_dns", "Usar el DNS de Tailscale en este equipo", "Normalmente desactivado: NetPing ya es el DNS.", p.accept_dns)}
+            ${o2("accept_dns", "Usar el DNS de Tailscale en este equipo", "Normalmente desactivado: Bipon Net ya es el DNS.", p.accept_dns)}
             ${o2("ssh", "Tailscale SSH", "Acceso SSH a este equipo autenticado por Tailscale.", p.ssh)}
             ${o2("shields_up", "Shields Up", "Bloquea conexiones entrantes desde la tailnet.", p.shields_up)}
             ${o2("exit_node_allow_lan", "Permitir LAN local con exit node", "", p.exit_node_allow_lan)}
-            ${o2("autostart", "Arrancar con NetPing", "", p.autostart)}
+            ${o2("autostart", "Arrancar con Bipon Net", "", p.autostart)}
             ${!running ? `<label class="field mt">Auth key (opcional)<input name="authkey" placeholder="tskey-auth-…" autocomplete="off"><small>Sin clave se mostrará un enlace para iniciar sesión.</small></label>` : ""}
             <div class="row mt">${running ? `<button class="btn primary">${ico("check")}Aplicar cambios</button>` : `<button class="btn primary">${ico("play")}Conectar</button>`}</div>
           </form>
@@ -270,7 +286,7 @@ export async function render(el) {
         <label class="field">Puerto UDP<input type="number" name="port" value="51820"></label>
         <label class="field">Red del túnel<input name="tunnel_net" value="10.8.0.0/24"></label>
         <label class="field">Red de tu casa<input name="lan_net" value="192.168.1.0/24"></label>
-        <label class="field">DNS clientes (NetPing)<input name="dns" placeholder="192.168.1.2"></label>
+        <label class="field">DNS clientes (Bipon Net)<input name="dns" placeholder="192.168.1.2"></label>
         <label class="field">Interfaz LAN en casa<input name="lan_iface" value="eth0"></label>
         <label class="field">Interfaz pública del VPS<input name="wan_iface" value="eth0"></label>
         <label class="field">MTU<input type="number" name="mtu" value="1420"></label>
@@ -282,7 +298,7 @@ export async function render(el) {
       <div class="opt"><div class="t"><b>Túnel completo para los clientes</b></div>${toggle("full_tunnel", true)}</div>
       <button class="btn primary mt">${ico("zap")}Generar configuraciones</button></form>
       <div class="card"><header><h3>${ico("info")}Cómo funciona</h3></header><ol class="steps small">
-        <li>Casa → VPS: túnel saliente (no necesita puertos abiertos en casa).</li><li>Clientes → VPS → casa: acceso a tu red y a NetPing.</li>
+        <li>Casa → VPS: túnel saliente (no necesita puertos abiertos en casa).</li><li>Clientes → VPS → casa: acceso a tu red y a Bipon Net.</li>
         <li>Internet → VPS:puerto → dispositivo de casa: puertos publicados con DNAT.</li><li>Latencia extra ≈ ping casa↔VPS: elige un VPS cercano.</li></ol></div></div>
       <div id="rres" class="mt"></div>`;
     api.get("/system").then((s) => {
@@ -320,9 +336,34 @@ export async function render(el) {
       <div class="alert info mt">${ico("info")}<div class="small">¿No sabes si tienes CGNAT? Ejecuta el <a href="#/connectivity">análisis de NAT y CGNAT</a>: te dirá cuál usar.</div></div></div>`;
   }
 
+  // ---------------------------------------------------------------- instalación con un clic
+  function bindInstall() {
+    const b = pane.querySelector("[data-install]");
+    if (!b) return;
+    const out = pane.querySelector("#inst-log");
+    const poll = async () => {
+      const st = await api.get("/packages").catch(() => null);
+      const job = st?.jobs?.[b.dataset.install];
+      if (!job) return;
+      out.classList.remove("hidden");
+      out.textContent = job.log.join("\n");
+      out.scrollTop = out.scrollHeight;
+      if (job.running) { b.disabled = true; b.classList.add("loading"); setTimeout(poll, 1500); return; }
+      b.disabled = false; b.classList.remove("loading");
+      if (job.ok) { toast(`${st.tools[b.dataset.install].name} instalado`); setTimeout(show, 1500); }
+      else toast("La instalación falló: revisa el registro", "error", 8000);
+    };
+    b.onclick = async () => {
+      try { await api.post(`/packages/${b.dataset.install}/install`); poll(); } catch (e) { toastErr(e); }
+    };
+    if (pkgs.jobs?.[b.dataset.install]?.running) poll();
+  }
+
   show();
   return () => clearInterval(timer);
 }
 
-const notInstalled = (n, pkg) => `<div class="alert warn">${ico("alert")}<div><b>${n} no está instalado en este sistema</b><p class="small">Viene incluido en la imagen Docker. En Linux/Proxmox: instala <code>${esc(pkg)}</code> y reinicia NetPing.</p></div></div>`;
+const notInstalled = (n, tool) => `<div class="card"><div class="row" style="flex-wrap:nowrap;gap:16px"><div class="stat"><div class="ic tint-blue" style="width:52px;height:52px">${ico("download")}</div></div>
+  <div class="grow"><h2>${n} no está instalado</h2><p class="muted small">${tool === "tailscale" ? "Se instala la última versión estable desde el repositorio oficial de Tailscale." : "Se instala desde los repositorios de tu distribución."} Tarda 1-2 minutos y no hace falta reiniciar.</p></div>
+  <button class="btn primary lg" data-install="${tool}">${ico("download")}Instalar ${n}</button></div><pre id="inst-log" class="terminal mt hidden" style="height:220px" data-notr></pre></div>`;
 const o2 = (name, t, d, v) => `<div class="opt"><div class="t"><b>${t}</b>${d ? `<span>${d}</span>` : ""}</div>${toggle(name, v)}</div>`;

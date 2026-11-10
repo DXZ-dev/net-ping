@@ -31,10 +31,28 @@ export async function render(el) {
             ${kv("Ubicación", [r.public.city, r.public.country].filter(Boolean).join(", ") || "—", r.public.colo ? `nodo Cloudflare ${r.public.colo}` : "")}
             ${kv("IP local", r.local_ip || "—", `router ${r.gateway || "—"}`)}
           </div></div>
-        <div class="card"><header><h3>${ico("console")}Tipo de NAT (juegos)</h3></header>
-          <span class="badge ${natCls}" style="font-size:14px;padding:5px 12px">${esc(r.nat.label)}</span>
-          <p class="small mt">${esc(r.nat.detail || "")}</p>
-          ${(r.nat.results || []).map((x) => `<div class="small muted mono">${esc(x.server)} → ${esc(x.ip)}:${x.port}</div>`).join("")}</div>
+        <div class="card"><header><h3>${ico("console")}Tipo de NAT</h3></header>
+          <span class="badge ${{ ok: "ok", warn: "warn", err: "err" }[r.nat_class?.level] || ""}" style="font-size:14px;padding:5px 12px">${esc(r.nat_class?.classic || r.nat.label)}</span>
+          <dl class="kv mt small"><dt>PlayStation</dt><dd><b>NAT ${esc(r.nat_class?.playstation || "—")}</b></dd><dt>Xbox</dt><dd><b>${esc(r.nat_class?.xbox || "—")}</b></dd>
+            <dt>Nintendo Switch</dt><dd><b>${esc(r.nat_class?.nintendo || "—")}</b></dd></dl>
+          <p class="small mt muted">${esc(r.nat.detail || "")}</p>
+          ${r.behavior?.mapped ? `<div class="small muted mono">${esc(r.behavior.server)} → ${esc(r.behavior.mapped.join(":"))}</div>` : ""}
+          ${r.behavior?.error ? `<p class="small warn">${esc(r.behavior.error)}</p>` : ""}</div>
+      </div>
+
+      <div class="grid g2 mt">
+        <div class="card"><header><h3>${ico("list")}Estados del NAT</h3></header>
+          <div class="table-wrap"><table><tbody>${(r.states || []).map((x) => `<tr><td><span class="dot dot-${x.status === "ok" ? "ok" : x.status === "warn" ? "warn" : x.status === "err" ? "err" : "off"}"></span> ${esc(x.name)}</td><td class="right"><b>${esc(x.value)}</b></td></tr>`).join("")}</tbody></table></div></div>
+        <div class="card"><header><h3>${ico("activity")}Sesiones NAT (tabla de conexiones)</h3></header>
+          ${r.sessions?.available ? `<div class="grid g3 mb">
+              <div class="big-metric"><div class="v" style="font-size:22px">${(r.sessions.count ?? 0).toLocaleString()}</div><div class="l">activas</div></div>
+              <div class="big-metric"><div class="v" style="font-size:22px">${(r.sessions.translated ?? 0).toLocaleString()}</div><div class="l">traducidas (NAT)</div></div>
+              <div class="big-metric"><div class="v" style="font-size:22px">${r.sessions.usage_pct ?? 0} %</div><div class="l">de la tabla</div></div></div>
+            ${r.sessions.max ? `<div class="progress mb"><i style="width:${Math.min(100, r.sessions.usage_pct || 0)}%"></i></div>` : ""}
+            <div class="col small">${Object.entries(r.sessions.states || {}).map(([k, v]) => `<div class="row between"><span>${esc(k)}</span><b>${v.toLocaleString()}</b></div>`).join("")}</div>
+            <p class="small muted mt">Tiempos de espera: TCP establecida ${r.sessions.tcp_established_timeout ?? "—"} s · UDP ${r.sessions.udp_timeout ?? "—"} s / flujo ${r.sessions.udp_stream_timeout ?? "—"} s.
+              Estas sesiones son las de este equipo; reflejan toda la red cuando Bipon hace de router.</p>`
+            : `<p class="muted small">El seguimiento de conexiones no está disponible en este equipo (se activa al usar el modo router o el firewall).</p>`}</div>
       </div>
 
       <div class="grid g3 mt">
@@ -67,7 +85,7 @@ export async function render(el) {
         <label class="field">Protocolo<select name="pr"><option>TCP</option><option>UDP</option></select></label>
         <label class="field">IP destino<input name="ip" value="${esc(r.local_ip || "")}"></label>
         <label class="field">Puerto interno<input type="number" name="ip_port" min="1" max="65535"></label>
-        <label class="field">Descripción<input name="desc" value="NetPing"></label></div>`,
+        <label class="field">Descripción<input name="desc" value="Bipon Net"></label></div>`,
       actions: [{ label: "Cancelar" }, { label: "Abrir", kind: "primary", onClick: async (m) => {
         await api.post("/nat/upnp", { action: "add", external_port: Number($("[name=ep]", m).value), protocol: $("[name=pr]", m).value,
           internal_ip: $("[name=ip]", m).value, internal_port: Number($("[name=ip_port]", m).value) || undefined, description: $("[name=desc]", m).value });

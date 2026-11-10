@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 from dnslib import QTYPE, RR, A, DNSRecord
 
-from netping.devices import schedule_active
-from netping.dns.cache import DNSCache
-from netping.dns.filter import (ST_LIST, ST_RULE, ST_SAFE, ST_SERVICE, ST_DEVICE, FilterEngine, Policy,
+from bipon.devices import schedule_active
+from bipon.dns.cache import DNSCache
+from bipon.dns.filter import (ST_LIST, ST_RULE, ST_SAFE, ST_SERVICE, ST_DEVICE, FilterEngine, Policy,
                                 parse_list_line)
-from netping.dns.upstream import Upstream
-from netping.unbound import render_config
-from netping.wireguard import generate
+from bipon.dns.upstream import Upstream
+from bipon.unbound import render_config
+from bipon.wireguard import generate
 
 
 # ------------------------------------------------------------------ listas

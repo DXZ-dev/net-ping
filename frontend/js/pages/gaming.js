@@ -29,7 +29,7 @@ export async function render(el, app) {
           <li><b>DNS:</b> elimina por completo la espera DNS de juegos y streaming (0,1-0,5 ms desde caché).</li>
           <li><b>CDN:</b> el test de abajo comprueba qué DNS te envía al nodo de streaming más cercano.</li>
           <li><b>Regiones:</b> mide qué servidores de juego te dan menos ping para elegir región/servidor.</li>
-          <li><b>Bufferbloat:</b> el lag cuando alguien descarga se arregla con QoS/SQM en el router (o aquí si NetPing es tu router).</li>
+          <li><b>Bufferbloat:</b> el lag cuando alguien descarga se arregla con QoS/SQM en el router (o aquí si Bipon Net es tu router).</li>
           <li class="muted">El ping al servidor del juego depende de tu ISP y de la distancia: ningún software puede bajarlo de ese mínimo físico, pero sí evitar que suba.</li>
         </ul></div>
     </div>
@@ -84,7 +84,7 @@ export async function render(el, app) {
   // ------------------------------------------------------------- QoS
   const q = await api.get("/qos").catch(() => ({ available: false }));
   el.querySelector("#qos").innerHTML = `<header><h2>${ico("activity")}QoS anti-bufferbloat (CAKE)</h2>${q.active?.length ? `<span class="badge ok">activo</span>` : ""}</header>
-    <div class="alert info mb">${ico("info")}<div class="small">Sólo tiene efecto si <b>el tráfico de tu red pasa por este equipo</b> (NetPing hace de router/gateway, p. ej. en Proxmox con OPNsense/OpenWrt al lado). Si tu router es otro, activa SQM/QoS en él con las velocidades del test.</div></div>
+    <div class="alert info mb">${ico("info")}<div class="small">Sólo tiene efecto si <b>el tráfico de tu red pasa por este equipo</b> (Bipon Net hace de router/gateway, p. ej. en Proxmox con OPNsense/OpenWrt al lado). Si tu router es otro, activa SQM/QoS en él con las velocidades del test.</div></div>
     ${q.available ? `<form class="form-grid" id="qf">
       <label class="field">Interfaz de salida (WAN)<select name="iface">${(q.interfaces || []).map((i) => `<option>${esc(i.name)}</option>`).join("")}</select></label>
       <label class="field">Velocidad de subida (Mbps)<input type="number" step="0.1" name="mbit" placeholder="92 % de tu subida real"></label>

@@ -65,7 +65,7 @@ export async function render(el, app) {
 
     <div class="grid g2 mt">
       <div class="card"><header><h2>${ico("list")}Registros DNS locales</h2></header>
-        <p class="muted small mb">Nombres para tus equipos (ej. <code>nas.lan → 192.168.1.10</code>). NetPing responde además en <code>netping.lan</code>.</p>
+        <p class="muted small mb">Nombres para tus equipos (ej. <code>nas.lan → 192.168.1.10</code>). Bipon Net responde además en <code>bipon.lan</code>.</p>
         <div id="local-list" class="col"></div>
         <form class="inline-form mt" id="local-form"><input name="name" placeholder="nas.lan" required><select name="type" style="max-width:100px"><option>A</option><option>AAAA</option><option>CNAME</option></select><input name="value" placeholder="192.168.1.10" required><button class="btn">${ico("plus")}</button></form>
       </div>

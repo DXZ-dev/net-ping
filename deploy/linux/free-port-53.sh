@@ -4,7 +4,7 @@
 # nombres con los DNS que le dé tu red. Uso: sudo ./free-port-53.sh [--undo]
 set -euo pipefail
 
-CONF=/etc/systemd/resolved.conf.d/netping.conf
+CONF=/etc/systemd/resolved.conf.d/bipon-net.conf
 
 if [[ $EUID -ne 0 ]]; then echo "Ejecuta como root (sudo)."; exit 1; fi
 
@@ -30,7 +30,7 @@ if command -v ss >/dev/null; then
   if ss -lunp 2>/dev/null | grep -qE '[:.]53\s'; then
     echo "AVISO: algo sigue usando el puerto 53:"
     ss -lunp | grep -E '[:.]53\s' || true
-    echo "Detén ese servicio (dnsmasq, pihole-FTL, AdGuardHome, unbound…) antes de iniciar NetPing."
+    echo "Detén ese servicio (dnsmasq, pihole-FTL, AdGuardHome, unbound…) antes de iniciar Bipon Net."
     exit 2
   fi
 fi

@@ -2,13 +2,27 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
-  <title>NetPing</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%233b82f6'/%3E%3Cpath d='M5 13h3l2-5 4 9 2-4h3' stroke='white' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="Bipon Net: DNS filtrante, control parental, VPN y herramientas de red para tu casa o empresa.">
+  <title>Bipon Net</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" href="/assets/icon-192.png">
+  <link rel="apple-touch-icon" href="/assets/icon-192.png">
   <link rel="stylesheet" href="/assets/css/app.css">
   <script>
-    try { const t = localStorage.getItem("netping-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+    // aplica tema e idioma antes de pintar (evita parpadeos)
+    try {
+      const p = JSON.parse(localStorage.getItem("bipon-ui") || "{}");
+      const r = document.documentElement;
+      const light = ["glass-light", "zinc-light", "sunset"];
+      r.dataset.skin = p.skin || "glass";
+      r.dataset.theme = light.includes(p.skin) ? "light" : "dark";
+      if (p.bg) r.dataset.bg = p.bg;
+      if (p.blur) r.dataset.blur = p.blur;
+      r.lang = localStorage.getItem("bipon-lang") || "es";
+    } catch {}
   </script>
 </head>
 <body>

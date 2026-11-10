@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =====================================================================
-#  Crea un contenedor LXC en Proxmox VE con NetPing instalado.
+#  Crea un contenedor LXC en Proxmox VE con Bipon Net instalado.
 #  Ejecútalo EN EL HOST PROXMOX, desde la carpeta del repositorio:
 #
 #     bash deploy/proxmox/create-lxc.sh                       # DHCP
@@ -8,7 +8,7 @@
 #
 #  Variables (opcionales):
 #     CTID       id del contenedor (por defecto, el siguiente libre)
-#     CT_NAME    hostname (netping)
+#     CT_NAME    hostname (bipon-net)
 #     STORAGE    almacenamiento del disco (local-lvm)
 #     TPL_STORE  almacenamiento de plantillas (local)
 #     BRIDGE     puente de red (vmbr0)
@@ -25,7 +25,7 @@ command -v pct >/dev/null || { echo "Este script debe ejecutarse en un host Prox
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 CTID="${CTID:-$(pvesh get /cluster/nextid)}"
-CT_NAME="${CT_NAME:-netping}"
+CT_NAME="${CT_NAME:-bipon-net}"
 STORAGE="${STORAGE:-local-lvm}"
 TPL_STORE="${TPL_STORE:-local}"
 BRIDGE="${BRIDGE:-vmbr0}"
@@ -61,7 +61,7 @@ pct create "$CTID" "${TPL_STORE}:vztmpl/${TEMPLATE}" \
   --hostname "$CT_NAME" --cores "$CORES" --memory "$MEMORY" --swap 512 \
   --rootfs "${STORAGE}:${DISK}" --net0 "$NET" \
   --unprivileged 1 --features nesting=1,keyctl=1 --onboot 1 \
-  --nameserver 1.1.1.1 --description "NetPing — DNS filtrante, Unbound, VPN y herramientas de red" >/dev/null
+  --nameserver 1.1.1.1 --description "Bipon Net — DNS filtrante, Unbound, VPN y herramientas de red" >/dev/null
 
 # /dev/net/tun para WireGuard / OpenVPN / Tailscale dentro del contenedor
 CONF="/etc/pve/lxc/${CTID}.conf"
@@ -81,10 +81,10 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
-info "Copiando NetPing al contenedor…"
+info "Copiando Bipon Net al contenedor…"
 TMP="$(mktemp -d)"
-tar -C "$REPO_DIR" --exclude=.git --exclude=data --exclude='__pycache__' -czf "$TMP/netping.tgz" .
-pct push "$CTID" "$TMP/netping.tgz" /root/netping.tgz
+tar -C "$REPO_DIR" --exclude=.git --exclude=data --exclude='__pycache__' -czf "$TMP/bipon-net.tgz" .
+pct push "$CTID" "$TMP/bipon-net.tgz" /root/bipon-net.tgz
 rm -rf "$TMP"
 
 ARGS=()
@@ -95,12 +95,12 @@ ARGS=()
 ARGSTR=""
 if [[ ${#ARGS[@]} -gt 0 ]]; then ARGSTR="$(printf '%q ' "${ARGS[@]}")"; fi
 
-info "Instalando NetPing dentro del contenedor (2-4 min)…"
-pct exec "$CTID" -- bash -c "apt-get update -qq && apt-get install -y -qq rsync >/dev/null && mkdir -p /root/netping && tar -xzf /root/netping.tgz -C /root/netping && bash /root/netping/deploy/linux/install.sh ${ARGSTR}"
+info "Instalando Bipon Net dentro del contenedor (2-4 min)…"
+pct exec "$CTID" -- bash -c "apt-get update -qq && apt-get install -y -qq rsync >/dev/null && mkdir -p /root/bipon-net && tar -xzf /root/bipon-net.tgz -C /root/bipon-net && bash /root/bipon-net/deploy/linux/install.sh ${ARGSTR}"
 
 CT_IP="$(pct exec "$CTID" -- bash -c "ip -4 -o addr show eth0 | awk '{print \$4}' | cut -d/ -f1")"
 echo
-ok "NetPing instalado en el contenedor $CTID"
+ok "Bipon Net instalado en el contenedor $CTID"
 echo "   Panel web:    http://${CT_IP}:8080"
 echo "   Servidor DNS: ${CT_IP}"
 [[ "$IP" == "dhcp" ]] && echo "   Consejo: reserva esta IP en el DHCP del router (un DNS debe tener IP fija)."
