@@ -149,6 +149,10 @@ YOUTUBE_RESTRICT: dict[str, str] = {
 }
 
 # Listas de bloqueo recomendadas (se ofrecen en la interfaz)
+# abuse.ch retiró su hostfile (HTTP 410); malware-filter publica URLhaus a diario en formato AdGuard.
+URLHAUS_URL = "https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-agh.txt"
+URLHAUS_OLD = "https://urlhaus.abuse.ch/downloads/hostfile/"
+
 RECOMMENDED_LISTS: list[dict] = [
     {"name": "StevenBlack Unified (anuncios + malware)", "category": "ads", "default": True,
      "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"},
@@ -163,7 +167,7 @@ RECOMMENDED_LISTS: list[dict] = [
     {"name": "Phishing Army", "category": "security", "default": False,
      "url": "https://phishing.army/download/phishing_army_blocklist.txt"},
     {"name": "URLhaus malware (abuse.ch)", "category": "security", "default": True,
-     "url": "https://urlhaus.abuse.ch/downloads/hostfile/"},
+     "url": URLHAUS_URL},
     {"name": "HaGeZi Tracking nativo (Windows/Office)", "category": "ads", "default": False,
      "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/native.winoffice.txt"},
     {"name": "StevenBlack contenido adulto", "category": "adult", "default": False,

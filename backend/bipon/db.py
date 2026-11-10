@@ -218,6 +218,10 @@ class Database:
         for col, typ in (("bufferbloat", "REAL"), ("grade", "TEXT"), ("loaded_ping", "REAL")):
             if col not in cols:
                 self.conn.execute(f"ALTER TABLE speedtests ADD COLUMN {col} {typ}")
+        # URLs de listas retiradas por su autor → sustituto mantenido
+        from .catalog import URLHAUS_OLD, URLHAUS_URL
+        self.conn.execute("UPDATE OR IGNORE blocklists SET url=?, last_status=NULL WHERE url=?", (URLHAUS_URL, URLHAUS_OLD))
+        self.conn.execute("DELETE FROM blocklists WHERE url=?", (URLHAUS_OLD,))
 
     # ---- primitivas -------------------------------------------------
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
