@@ -2,6 +2,12 @@ import { api, esc, ico, ago, toast, toastErr, busy, toggle, empty, on, modal, $,
 import { t } from "../i18n.js";
 
 export const title = "Red: DHCP, Wi-Fi y portal";
+
+let capTimer = null;
+const capRow = (a, reg) => `<tr><td><span class="dot ${a.online ? "dot-ok" : "dot-off"}"></span> ${esc(a.device || a.mac)}<div class="small muted">${esc(a.name || "")} ${esc(a.email || "")}</div></td>
+  <td class="small muted nowrap">${new Date(a.ts * 1000).toLocaleString(document.documentElement.lang === "en" ? "en-US" : "es")}</td>
+  <td class="actions nowrap">${a.mac.startsWith("ip:") ? "" : `<button class="icon-btn" data-trust-mac="${esc(a.mac)}" data-on="${reg ? 1 : 0}" title="${t(reg ? "Quitar de registrados" : "Registrar (no volver a pedir)")}">${ico("star")}</button>`}
+  <button class="icon-btn" data-rst="${esc(a.mac)}" title="${t("Pedir de nuevo")}">${ico("refresh")}</button></td></tr>`;
 export const subtitle = "Cómo se conectan tus dispositivos a Bipon, la cobertura Wi-Fi y la página de bienvenida";
 
 export async function render(el, app) {
@@ -134,9 +140,20 @@ export async function render(el, app) {
           <label class="field">${t("Puerto del portal")}<input type="number" name="port" value="${c.port}"></label></div>
         ${opt2("ask_name", "Pedir nombre", c.ask_name)}${opt2("ask_email", "Pedir email", c.ask_email)}
         <div class="row mt"><button class="btn primary">${ico("check")}${t("Guardar")}</button><a class="btn" href="/api/captive/preview" target="_blank">${ico("external")}${t("Vista previa")}</a></div></form>
-        <div class="col"><div class="card"><header><h3>${ico("devices")}${t("Pendientes de aceptar")}</h3></header>${s.pending.length ? s.pending.map((p) => `<div class="row between small"><span>${esc(p.name || p.ip)}</span><span class="mono muted">${esc(p.ip)}</span></div>`).join("") : `<p class="muted small">${t("Ninguno")}</p>`}</div>
+        <div class="col">
+          ${s.weak_dns ? `<div class="alert warn">${ico("alert")}<div class="small">${t("Con el modo automático los equipos también pueden usar el DNS del router y saltarse el portal. Para que sea obligatorio, pon Bipon como único DNS en el router o usa el DHCP de Bipon.")}</div></div>` : ""}
+          ${c.enabled && !s.firewall ? `<div class="alert info">${ico("info")}<div class="small">${t("El portal funciona por DNS: al volver a pedir los términos, las conexiones ya abiertas del dispositivo pueden seguir unos minutos. Con el modo router de Bipon el corte es inmediato.")}</div></div>` : ""}
+          <div class="card"><header><h3>${ico("devices")}${t("Pendientes de aceptar")} (${s.pending.length})</h3>
+            <button class="btn sm" id="cap-scan">${ico("refresh")}${t("Buscar dispositivos nuevos")}</button></header>
+            <p class="small muted mb">${t("Se actualiza solo cada pocos segundos.")}</p>
+            ${s.pending.length ? s.pending.map((p) => `<div class="row between small" style="padding:6px 0"><span class="grow truncate"><b>${esc(p.name || p.ip)}</b><span class="muted"> · ${esc(p.ip)}${p.brand ? " · " + esc(p.brand) : ""}</span></span>
+              <button class="btn sm" data-allow="${esc(p.mac)}">${ico("check")}${t("Permitir")}</button><button class="btn sm ghost" data-allow="${esc(p.mac)}" data-trust="1" title="${t("Permitir y registrar")}">${ico("star")}</button></div>`).join("")
+              : `<p class="muted small">${t("Ninguno")}</p>`}</div>
+          <div class="card"><header><h3>${ico("star")}${t("Dispositivos registrados")} (${s.registered.length})</h3></header>
+            <p class="small muted mb">${t("Nunca se les vuelve a pedir aceptar: ni al caducar ni al pedir a todos de nuevo.")}</p>
+            ${s.registered.length ? `<div class="table-wrap"><table><tbody>${s.registered.map((a) => capRow(a, true)).join("")}</tbody></table></div>` : `<p class="muted small">${t("Ninguno todavía. Pulsa ☆ en una aceptación para registrarlo.")}</p>`}</div>
           <div class="card"><header><h3>${ico("check")}${t("Aceptaciones")} (${s.accepts.length})</h3><button class="btn sm ghost" id="reset-all">${t("Pedir a todos de nuevo")}</button></header>
-          <div class="table-wrap"><table><tbody>${s.accepts.slice(0, 100).map((a) => `<tr><td>${esc(a.device || a.mac)}<div class="small muted">${esc(a.name || "")} ${esc(a.email || "")}</div></td><td class="small muted">${new Date(a.ts * 1000).toLocaleString()}</td><td class="actions"><button class="icon-btn" data-rst="${esc(a.mac)}" title="${t("Pedir de nuevo")}">${ico("refresh")}</button></td></tr>`).join("") || `<tr><td class="muted">${t("Nadie todavía")}</td></tr>`}</tbody></table></div></div></div></div>`;
+          <div class="table-wrap"><table><tbody>${s.accepts.slice(0, 150).map((a) => capRow(a, false)).join("") || `<tr><td class="muted">${t("Nadie todavía")}</td></tr>`}</tbody></table></div></div></div></div>`;
       const form = pane.querySelector("#cf");
       form.onsubmit = (e) => {
         e.preventDefault();
@@ -148,7 +165,20 @@ export async function render(el, app) {
         busy(form.querySelector(".primary"), () => api.put("/captive", body)).then(() => { toast(t("Portal guardado")); setTimeout(show, 2000); }).catch(() => {});
       };
       pane.querySelector("#reset-all").onclick = async () => { if (confirm(t("¿Pedir a todos los dispositivos que acepten de nuevo?"))) { await api.del("/captive/accepts").catch(toastErr); show(); } };
-      on(pane, "click", "[data-rst]", async (e, b) => { await api.del(`/captive/accepts?mac=${encodeURIComponent(b.dataset.rst)}`).catch(toastErr); show(); });
+      on(pane, "click", "[data-rst]", async (e, b) => { await api.del(`/captive/accepts?mac=${encodeURIComponent(b.dataset.rst)}`).then(() => toast(t("Se le pedirá aceptar de nuevo"))).catch(toastErr); show(); });
+      on(pane, "click", "[data-allow]", async (e, b) => { await busy(b, () => api.post("/captive/allow", { mac: b.dataset.allow, trusted: !!b.dataset.trust })).then(() => toast(t("Dispositivo permitido"))).catch(toastErr); show(); });
+      on(pane, "click", "[data-trust-mac]", async (e, b) => { await api.post("/captive/trust", { mac: b.dataset.trustMac, trusted: b.dataset.on !== "1" }).catch(toastErr); show(); });
+      pane.querySelector("#cap-scan").onclick = (e) => busy(e.currentTarget, () => api.post("/devices/scan")).then(() => setTimeout(show, 2500)).catch(() => {});
+      // refresco automático mientras esta pestaña esté abierta y no se esté editando el formulario
+      clearInterval(capTimer);
+      const sig = (x) => JSON.stringify([x.pending, x.accepts.map((a) => [a.mac, a.ts, a.online]), x.registered.map((a) => [a.mac, a.online])]);
+      const mine = sig(s);
+      capTimer = setInterval(async () => {
+        if (!document.body.contains(form)) return clearInterval(capTimer);
+        if (form.contains(document.activeElement)) return;
+        const n = await api.get("/captive").catch(() => null);
+        if (n && sig(n) !== mine) show();  // sólo se redibuja si algo cambió
+      }, 5000);
     },
     // ------------------------------------------------------------ acceso local/externo
     async access() {

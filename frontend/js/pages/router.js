@@ -102,10 +102,17 @@ export async function render(el) {
     },
     // ------------------------------------------------------------ velocidad
     async speed() {
-      const [r, d] = await Promise.all([api.get("/router"), api.get("/devices")]);
+      const [r, d, lv] = await Promise.all([api.get("/router"), api.get("/devices"), api.get("/devices/rates").catch(() => ({ rates: {} }))]);
+      const SRC = { router: "router", proxmox: "Proxmox", local: "Bipon" };
+      const cell = (x, k, arrow) => {
+        const v = lv.rates[x.mac];
+        if (v) return `${arrow}${rate(v[k])}`;
+        return `<span class="muted" title="${t("Este equipo no pasa por Bipon: activa el modo router para medirlo")}">${arrow}—</span>`;
+      };
       const sh = r.config.shaping || {};
       const draw = (devs) => devs.map((x) => `<tr data-mac="${esc(x.mac)}"><td>${brandIcon(x.brand, x.kind)}</td><td><b>${esc(x.name || x.friendly || x.hostname || x.ip || x.mac)}</b><div class="small muted mono">${esc(x.ip || "")}</div></td>
-        <td class="right rate"><span class="d">↓${rate(x.rate?.rx_bps)}</span></td><td class="right rate"><span class="u">↑${rate(x.rate?.tx_bps)}</span></td>
+        <td class="right rate"><span class="d">${cell(x, "rx_bps", "↓")}</span></td><td class="right rate"><span class="u">${cell(x, "tx_bps", "↑")}</span></td>
+        <td class="small muted src">${lv.rates[x.mac] ? esc(SRC[lv.rates[x.mac].source] || "") : ""}</td>
         <td><input type="number" step="0.5" min="0" data-ld="${esc(x.mac)}" value="${x.limit_down || ""}" placeholder="∞" style="width:90px"></td>
         <td><input type="number" step="0.5" min="0" data-lu="${esc(x.mac)}" value="${x.limit_up || ""}" placeholder="∞" style="width:90px"></td>
         <td class="actions"><button class="btn sm" data-lim="${esc(x.mac)}">${t("Aplicar")}</button></td></tr>`).join("");
@@ -116,7 +123,13 @@ export async function render(el) {
           <label class="field">${t("Bajada total de tu línea (Mbps)")}<input type="number" name="down_mbit" value="${sh.down_mbit || ""}"></label>
           <label class="field">${t("Subida total de tu línea (Mbps)")}<input type="number" name="up_mbit" value="${sh.up_mbit || ""}"></label>
           <div class="row" style="align-items:flex-end"><button class="btn primary">${ico("check")}${t("Guardar")}</button></div></form></div>
-        <div class="card"><header><h3>${ico("devices")}${t("Dispositivos")} <span class="live-dot"></span></h3></header><div class="table-wrap"><table><thead><tr><th></th><th>${t("Dispositivo")}</th><th class="right">${t("Bajada ahora")}</th><th class="right">${t("Subida ahora")}</th><th>${t("Límite ↓")}</th><th>${t("Límite ↑")}</th><th></th></tr></thead>
+        <div class="grid g2 mb">
+          <div class="card stat"><div class="ic tint-blue">${ico("globe")}</div><div class="truncate"><div class="v" id="line-v">${lv.line ? `↓${rate(lv.line.rx_bps)} · ↑${rate(lv.line.tx_bps)}` : "—"}</div>
+            <div class="l">${t("Internet en total (router por UPnP)")}${lv.line ? "" : ` · <span class="small">${t("tu router no publica los contadores por UPnP")}</span>`}</div></div></div>
+          ${lv.router_mode ? `<div class="alert ok">${ico("check")}<div class="small">${t("Modo router activo: se mide la velocidad de todos los dispositivos.")}</div></div>`
+            : `<div class="alert info">${ico("info")}<div class="small"><b>${t("¿Por qué algunos equipos muestran «—»?")}</b> ${t("Bipon sólo puede medir el tráfico que pasa por él. Ahora mide en vivo: el propio Bipon")}${lv.proxmox ? t(", las VMs y contenedores de Proxmox") : ""}${t(" y el total de la línea. Para medir cada móvil, TV o PC, activa el modo router (Bipon como puerta de enlace) en «Modo router y firewall».")}</div></div>`}
+        </div>
+        <div class="card"><header><h3>${ico("devices")}${t("Dispositivos")} <span class="live-dot"></span></h3></header><div class="table-wrap"><table><thead><tr><th></th><th>${t("Dispositivo")}</th><th class="right">${t("Bajada ahora")}</th><th class="right">${t("Subida ahora")}</th><th>${t("Fuente")}</th><th>${t("Límite ↓")}</th><th>${t("Límite ↑")}</th><th></th></tr></thead>
         <tbody id="spd">${draw(d.devices.filter((x) => x.ip))}</tbody></table></div></div>`;
       const shf = pane.querySelector("#shf");
       shf.onsubmit = (e) => { e.preventDefault(); busy(shf.querySelector(".primary"), () => api.post("/router/shaping", { enabled: shf.enabled.checked, iface: shf.iface.value.trim(), down_mbit: Number(shf.down_mbit.value) || null, up_mbit: Number(shf.up_mbit.value) || null })).then((x) => toast(x.message, x.ok ? "ok" : "error", 7000)).catch(() => {}); };
@@ -126,13 +139,18 @@ export async function render(el) {
           .then((x) => toast(x.message || t("Límite aplicado"), x.applied === null ? "info" : "ok", 6000)).catch(() => {});
       });
       timer = setInterval(async () => {
-        const n = await api.get("/devices").catch(() => null);
+        const n = await api.get("/devices/rates").catch(() => null);
         if (!n) return;
-        for (const x of n.devices) {
-          const row = pane.querySelector(`tr[data-mac="${CSS.escape(x.mac)}"]`);
-          if (row && x.rate) { row.querySelector(".d").textContent = `↓${rate(x.rate.rx_bps)}`; row.querySelector(".u").textContent = `↑${rate(x.rate.tx_bps)}`; }
+        lv.rates = n.rates;
+        for (const [mac, v] of Object.entries(n.rates)) {
+          const row = pane.querySelector(`tr[data-mac="${CSS.escape(mac)}"]`);
+          if (!row) continue;
+          row.querySelector(".d").textContent = `↓${rate(v.rx_bps)}`;
+          row.querySelector(".u").textContent = `↑${rate(v.tx_bps)}`;
+          row.querySelector(".src").textContent = SRC[v.source] || "";
         }
-      }, 10000);
+        if (n.line) pane.querySelector("#line-v").textContent = `↓${rate(n.line.rx_bps)} · ↑${rate(n.line.tx_bps)}`;
+      }, 3000);
     },
     // ------------------------------------------------------------ tráfico
     async traffic() {

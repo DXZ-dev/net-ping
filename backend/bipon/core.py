@@ -68,6 +68,8 @@ class Context:
         self.sync = SyncManager(self)
         self.wifi = WifiManager(self)
         self.router = RouterManager(self)
+        from .liverates import LiveRates
+        self.rates = LiveRates(self)
         self.routerctl = RouterControl(self)
         self.configs = ConfigProfiles(self)
         self.updater = Updater(self)
@@ -213,6 +215,7 @@ class Context:
         self._bg(self.sync.loop(), "sincronización")
         self._bg(self.wifi.loop(), "wifi")
         self._bg(self.router.loop(), "router")
+        self._bg(self.rates.loop(), "velocidad en vivo")
         self._bg(self.updater.loop(), "actualizaciones")
         self._bg(self.captive.loop(), "portal cautivo")
         self.db.event("info", "sistema", "Bipon Net iniciado")

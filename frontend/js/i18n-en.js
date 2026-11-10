@@ -1441,7 +1441,28 @@ export const EN = {
   "🔁 Fallo de sincronización con el nodo secundario": "🔁 Sync failure with the secondary node",
   "🔐 Intentos de acceso fallidos al panel": "🔐 Failed login attempts on the panel",
   "🔴 Caída de Internet": "🔴 Internet outage",
-  "🚨 DNS o Unbound caído": "🚨 DNS or Unbound down"
+  "🚨 DNS o Unbound caído": "🚨 DNS or Unbound down",
+  "Con el modo automático los equipos también pueden usar el DNS del router y saltarse el portal. Para que sea obligatorio, pon Bipon como único DNS en el router o usa el DHCP de Bipon.": "In automatic mode devices can also use the router's DNS and skip the portal. To make it mandatory, set Bipon as the only DNS on the router or use Bipon's DHCP.",
+  "El portal funciona por DNS: al volver a pedir los términos, las conexiones ya abiertas del dispositivo pueden seguir unos minutos. Con el modo router de Bipon el corte es inmediato.": "The portal works through DNS: when asking for the terms again, the device's already open connections may continue for a few minutes. With Bipon's router mode the cut is immediate.",
+  "Buscar dispositivos nuevos": "Find new devices",
+  "Se actualiza solo cada pocos segundos.": "Updates by itself every few seconds.",
+  "Permitir y registrar": "Allow and register",
+  "Dispositivos registrados": "Registered devices",
+  "Nunca se les vuelve a pedir aceptar: ni al caducar ni al pedir a todos de nuevo.": "They're never asked to accept again: not on expiry nor when asking everyone again.",
+  "Ninguno todavía. Pulsa ☆ en una aceptación para registrarlo.": "None yet. Press ☆ on an acceptance to register it.",
+  "Se le pedirá aceptar de nuevo": "It will be asked to accept again",
+  "Dispositivo permitido": "Device allowed",
+  "Quitar de registrados": "Remove from registered",
+  "Registrar (no volver a pedir)": "Register (don't ask again)",
+  "Este equipo no pasa por Bipon: activa el modo router para medirlo": "This device doesn't go through Bipon: enable router mode to measure it",
+  "Fuente": "Source",
+  "Internet en total (router por UPnP)": "Internet total (router via UPnP)",
+  "tu router no publica los contadores por UPnP": "your router doesn't publish counters over UPnP",
+  "Modo router activo: se mide la velocidad de todos los dispositivos.": "Router mode active: every device's speed is measured.",
+  "¿Por qué algunos equipos muestran «—»?": "Why do some devices show «—»?",
+  "Bipon sólo puede medir el tráfico que pasa por él. Ahora mide en vivo: el propio Bipon": "Bipon can only measure traffic that goes through it. It's measuring live: Bipon itself",
+  ", las VMs y contenedores de Proxmox": ", the Proxmox VMs and containers",
+  " y el total de la línea. Para medir cada móvil, TV o PC, activa el modo router (Bipon como puerta de enlace) en «Modo router y firewall».": " and the line total. To measure every phone, TV or PC, enable router mode (Bipon as gateway) in «Router mode & firewall»."
 };
 
 export const EN_PATTERNS = [

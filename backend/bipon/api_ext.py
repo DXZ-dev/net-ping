@@ -771,6 +771,25 @@ async def captive_preview(request: Request):
     return Response(ctx(request).captive.page("", preview=True), media_type="text/html")
 
 
+@api.post("/captive/allow")
+async def captive_allow(request: Request, body: dict = Body(...)):
+    """Aprueba un dispositivo pendiente sin pasar por la página (y opcionalmente lo registra)."""
+    c = ctx(request)
+    mac = str(body.get("mac", "")).lower()
+    if mac not in c.devices.devices:
+        raise HTTPException(404, "Dispositivo no encontrado")
+    c.captive.allow(mac, trusted=bool(body.get("trusted")))
+    return c.captive.status()
+
+
+@api.post("/captive/trust")
+async def captive_trust(request: Request, body: dict = Body(...)):
+    """Dispositivos registrados: no se les vuelve a pedir aceptar (ni al pedir a todos de nuevo ni al caducar)."""
+    c = ctx(request)
+    c.captive.trust(str(body.get("mac", "")).lower(), bool(body.get("trusted", True)))
+    return c.captive.status()
+
+
 @api.delete("/captive/accepts")
 async def captive_reset(request: Request, mac: str | None = None):
     ctx(request).captive.reset(mac)

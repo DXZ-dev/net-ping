@@ -93,6 +93,10 @@ class RouterManager:
                     continue
                 if devices.policy_for(d["ip"]).block_all:
                     blocked_macs.append(mac)
+        captive = getattr(self.ctx, "captive", None)
+        if captive is not None:
+            # portal cautivo: sin aceptar los términos no hay salida a Internet (sólo DNS/portal de Bipon)
+            blocked_macs += [m for m in captive.pending_macs() if m not in blocked_macs]
         self_ip = devices.self_ip or netinfo.primary_ip() or "127.0.0.1"
         dns_port = int(self.ctx.settings.get("dns.port", 53))
         lan_ifs = [c["lan"]] if c.get("lan") else []
@@ -299,6 +303,20 @@ class RouterManager:
             if devs.policy_for(d["ip"]).block_all:
                 await _run("conntrack", "-D", "-s", d["ip"])
                 await _run("conntrack", "-D", "-d", d["ip"])
+
+    async def enforce_captive(self, cut_mac: str | None = None) -> None:
+        """Portal cautivo: actualiza el firewall al aceptar o al volver a pedir los términos y,
+        si se vuelve a pedir, corta las conexiones abiertas del dispositivo."""
+        c = self.cfg()
+        if not (c.get("enabled") and self.available) or self.pending:
+            return
+        await self.apply(c, confirm_required=False)
+        if cut_mac is not None and shutil.which("conntrack"):
+            devs = self.ctx.devices
+            macs = [cut_mac] if cut_mac else self.ctx.captive.pending_macs()
+            targets = [devs.devices.get(m, {}).get("ip") for m in macs]
+            for ip in filter(None, targets):
+                await _run("conntrack", "-D", "-s", ip)
 
     # ---------------------------------------------------------------- contabilidad
     async def read_counters(self) -> dict[str, tuple[int, int]]:

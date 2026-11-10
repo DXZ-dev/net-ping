@@ -639,7 +639,7 @@ async def devices_list(request: Request):
         f"SELECT client, COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked, MAX(ts) last FROM queries WHERE ts>=? GROUP BY client", (since,))}
     out = []
     now = time.time()
-    rates = getattr(c.router, "rates", {})
+    rates = c.rates.snapshot()
     for d in c.devices.devices.values():
         q = counts.get(d.get("ip") or "", {})
         pol = c.devices.policy_for(d["ip"]) if d.get("ip") else None
@@ -653,6 +653,12 @@ async def devices_list(request: Request):
     out.sort(key=lambda x: (not x["online"], tuple(int(p) for p in (x.get("ip") or "999.999.999.999").split(".")) if (x.get("ip") or "").count(".") == 3 else (999,)))
     return {"devices": out, "scanning": c.devices.scanning, "last_scan": c.devices.last_scan, "gateway": c.devices.gateway,
             "self_ip": c.devices.self_ip}
+
+
+@api.get("/devices/rates")
+async def devices_rates(request: Request):
+    """Velocidad actual de cada dispositivo (modo router, Proxmox, este equipo) y total de la línea (UPnP)."""
+    return ctx(request).rates.info()
 
 
 @api.get("/devices/stream")
