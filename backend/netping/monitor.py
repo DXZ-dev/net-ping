@@ -50,9 +50,11 @@ class Monitor:
         if down and self.outage_since is None:
             self.outage_since = now
             self.ctx.db.event("error", "conexión", "Se perdió la conexión a Internet")
+            self.ctx.notify.emit("internet_down", "Sin conexión a Internet", "NetPing ha detectado una caída de Internet. Te avisará cuando vuelva.", key="inet")
         elif not down and self.outage_since is not None:
             dur = int(now - self.outage_since)
             self.ctx.db.event("warning", "conexión", f"Conexión a Internet restablecida tras {dur} s sin servicio")
+            self.ctx.notify.emit("internet_up", "Internet restablecido", f"La conexión volvió tras {dur // 60} min {dur % 60} s sin servicio.", key="inet")
             self.outage_since = None
         self.last = {"ts": now, "results": {k: v for k, v in results.items() if isinstance(v, dict)}, "dns_ms": dns_ms,
                      "online": not down}

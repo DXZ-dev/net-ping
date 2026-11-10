@@ -114,6 +114,17 @@ def neighbors() -> list[dict]:
     return res
 
 
+def neighbors6() -> list[dict]:
+    """Tabla de vecinos IPv6 (para asociar consultas DNS por IPv6 a cada dispositivo)."""
+    data = run_json(["ip", "-j", "-6", "neigh", "show"]) if shutil.which("ip") else None
+    out = []
+    for n in data or []:
+        mac = n.get("lladdr")
+        if mac and not _SKIP_IF.match(n.get("dev", "")):
+            out.append({"ip": n["dst"], "mac": mac.lower(), "dev": n.get("dev")})
+    return out
+
+
 # --------------------------------------------------------------------- OUI
 class OUIDatabase:
     URLS = [

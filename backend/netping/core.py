@@ -5,20 +5,32 @@ import asyncio
 import logging
 import time
 
-from . import auth
+from . import auth, region, tls
 from .advisor import Advisor
+from .autodns import AutoDNS
 from .blocklists import BlocklistManager
 from .catalog import DNS_PRESETS
 from .config import DATA_DIR, init_settings
 from .db import init_db
 from .devices import DeviceManager
-from .gaming import GamingManager
+from .dhcp import DHCPServer
 from .dns.cache import DNSCache
 from .dns.filter import FilterEngine
 from .dns.server import DNSServer
 from .dns.upstream import UpstreamPool
+from .family import FamilyManager
+from .gaming import GamingManager
+from .integrations import WifiManager
 from .monitor import Monitor, optimizer_loop
+from .notify import Notifier
+from .router import RouterManager
+from .routerctl import RouterControl
+from .configprofiles import ConfigProfiles
+from .updater import Updater
+from .scheduler import Scheduler
+from .security import SecurityManager
 from .speedtest import SpeedTest
+from .sync import SyncManager
 from .unbound import UnboundManager
 from .vpn import VPNManager
 
@@ -28,8 +40,10 @@ log = logging.getLogger("netping")
 class Context:
     def __init__(self):
         self.settings = init_settings()
-        auth.apply_env_password()
+        region.apply_timezone((self.settings.get("region") or {}).get("timezone"))
         self.db = init_db(DATA_DIR / "netping.db")
+        auth.migrate_legacy()
+        auth.apply_env_password()
         self.engine = FilterEngine()
         self.pool = UpstreamPool()
         self.cache = DNSCache()
@@ -40,10 +54,23 @@ class Context:
         self.monitor = Monitor(self)
         self.speedtest = SpeedTest()
         self.vpn = VPNManager()
+        self.notify = Notifier(self)
         self.advisor = Advisor(self)
         self.gaming = GamingManager(self)
+        self.family = FamilyManager(self)
+        self.security = SecurityManager(self)
+        self.dhcp = DHCPServer(self)
+        self.autodns = AutoDNS(self)
+        self.scheduler = Scheduler(self)
+        self.sync = SyncManager(self)
+        self.wifi = WifiManager(self)
+        self.router = RouterManager(self)
+        self.routerctl = RouterControl(self)
+        self.configs = ConfigProfiles(self)
+        self.updater = Updater(self)
         self.dns_error: str | None = None
         self.upstream_fallback = False
+        self.anonymize = bool((self.settings.get("privacy") or {}).get("anonymize_clients"))
         self.tasks: list[asyncio.Task] = []
         self.started = time.time()
 
@@ -51,9 +78,32 @@ class Context:
         self.dns.policy_for = self.devices.policy_for
         self.dns.ptr_name = self.devices.ptr_name
         self.dns.self_ip = lambda: self.devices.self_ip
-        self.dns.on_query = self.db.log_query
+        self.dns.on_query = self._log_query
         self.dns.on_client = self.devices.track_client
+        self.dns.on_usage = self.family.record
+        self.dns.on_threat = self.security.threat_hit
+        self.dns.name_lookup = self.dhcp.lookup_name
+        self.devices.family = self.family
+        self.devices.on_new_device = self._new_device
+        self.lists.on_failure = lambda name, msg: self.notify.emit("lists_failed", "No se pudo actualizar una lista",
+                                                                   f"{name}: {msg}", key=name)
+        self.unbound.on_crash = lambda msg: self.notify.emit("dns_down", "Unbound se detuvo", f"{msg}. NetPing lo está reiniciando.", key="unbound")
         self.settings.on_change(self._on_settings)
+
+    # ---- eventos --------------------------------------------------------------
+    def _log_query(self, row: tuple) -> None:
+        if self.anonymize:
+            import hashlib
+            row = (row[0], "anon-" + hashlib.sha256((self.settings.get("secret") + row[1]).encode()).hexdigest()[:8], *row[2:])
+        self.db.log_query(row)
+
+    def _new_device(self, d: dict) -> None:
+        if not self.devices.last_scan:  # el primer escaneo descubre toda la red: no se avisa de cada equipo
+            return
+        name = d.get("name") or d.get("hostname") or d.get("vendor") or d.get("ip") or d.get("mac")
+        detail = " · ".join(x for x in (d.get("ip"), d.get("vendor"), d.get("mac")) if x)
+        self.notify.emit("device_new", "Nuevo dispositivo en tu red", f"{name}" + (f" ({detail})" if detail else "") +
+                         ". Si no lo reconoces, puedes bloquearlo desde NetPing.", data=d, key=d.get("mac") or name)
 
     # ---- aplicar configuración ----------------------------------------------
     def _on_settings(self, section: str) -> None:
@@ -63,8 +113,12 @@ class Context:
             self.apply_blocking()
         if section in ("gaming", "*"):
             self.gaming.apply()
+        if section in ("security", "*"):
+            self.security.apply()
         if section in ("profiles", "*"):
             self.devices.invalidate()
+        if section in ("privacy", "*"):
+            self.anonymize = bool((self.settings.get("privacy") or {}).get("anonymize_clients"))
 
     def apply_dns_settings(self) -> None:
         d = self.settings.get("dns")
@@ -86,6 +140,8 @@ class Context:
         self.dns.prefetch = bool(d.get("prefetch", True))
         self.dns.cf = d.get("conditional_forwarding") or {}
         self.dns.set_local_records(d.get("local_records") or [])
+        dom = ((self.settings.get("dhcp") or {}).get("domain") or "lan").lower()
+        self.dns.local_tlds = {"lan", "home", "local", "internal", "localdomain", dom.rsplit(".", 1)[-1]}
 
     def apply_blocking(self) -> None:
         b = self.settings.get("blocking")
@@ -104,6 +160,7 @@ class Context:
         self.apply_dns_settings()
         self.apply_blocking()
         self.gaming.apply()
+        await self.security.start()
         d = self.settings.get("dns")
         try:
             await self.dns.start(d.get("listen", "0.0.0.0"), int(d.get("port", 53)))
@@ -113,6 +170,13 @@ class Context:
                               "¿Hay otro servicio usando el puerto 53 (systemd-resolved, dnsmasq, Pi-hole)?")
             log.error(self.dns_error)
             self.db.event("error", "dns", self.dns_error)
+        t = self.settings.get("tls") or {}
+        if t.get("enabled", True) and t.get("dot", True):
+            try:
+                tls.generate_self_signed()
+                await self.dns.start_dot(int(t.get("dot_port", 853)), tls.server_context())
+            except Exception as exc:
+                log.warning("DNS-over-TLS no disponible: %s", exc)
         self._bg(self._flush_loop(), "flush")
         self._bg(self._maintenance_loop(), "mantenimiento")
         self._bg(self._blocking_loop(), "bloqueo")
@@ -122,15 +186,32 @@ class Context:
         self._bg(optimizer_loop(self), "optimizador")
         self._bg(self.vpn.start(), "vpn")
         self._bg(self.gaming.loop(), "gaming")
+        self._bg(self.family.loop(), "tiempo de pantalla")
+        self._bg(self.security.loop(), "seguridad")
+        self._bg(self.dhcp.loop(), "dhcp")
+        self._bg(self.autodns.loop(), "modo automático")
+        self._bg(self.scheduler.loop(), "programador")
+        self._bg(self.sync.loop(), "sincronización")
+        self._bg(self.wifi.loop(), "wifi")
+        self._bg(self.router.loop(), "router")
+        self._bg(self.updater.loop(), "actualizaciones")
         self.db.event("info", "sistema", "NetPing iniciado")
 
     async def stop(self) -> None:
+        # primero se retira el anuncio del modo automático: los equipos vuelven al DNS del router al instante
+        try:
+            await asyncio.wait_for(self.autodns.withdraw(), 5)
+        except Exception:
+            pass
         for t in self.tasks:
             t.cancel()
+        await self.dhcp.stop()
         await self.dns.stop()
         await self.unbound.stop()
         await self.vpn.shutdown()
         await self.pool.close()
+        await self.notify.close()
+        self.family.flush()
         self.db.flush_queries()
 
     async def _flush_loop(self):

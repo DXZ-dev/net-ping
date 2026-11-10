@@ -88,6 +88,107 @@ CREATE TABLE IF NOT EXISTS events (
     message TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
+
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'admin',
+    totp_secret TEXT,
+    totp_enabled INTEGER DEFAULT 0,
+    created REAL,
+    last_login REAL
+);
+
+CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    role TEXT NOT NULL,
+    created REAL,
+    last_used REAL
+);
+
+CREATE TABLE IF NOT EXISTS dhcp_leases (
+    mac TEXT PRIMARY KEY,
+    ip TEXT NOT NULL,
+    hostname TEXT DEFAULT '',
+    expires REAL NOT NULL,
+    scope TEXT DEFAULT 'lan'
+);
+
+CREATE TABLE IF NOT EXISTS usage (
+    day TEXT NOT NULL,
+    mac TEXT NOT NULL,
+    service TEXT NOT NULL,
+    minutes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, mac, service)
+);
+
+CREATE TABLE IF NOT EXISTS traffic (
+    ts REAL NOT NULL,
+    mac TEXT NOT NULL,
+    rx INTEGER NOT NULL,
+    tx INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_traffic_ts ON traffic(ts);
+
+CREATE TABLE IF NOT EXISTS notify_log (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    event TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    title TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    error TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS reports (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    start REAL NOT NULL,
+    end REAL NOT NULL,
+    data TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS push_subs (
+    id INTEGER PRIMARY KEY,
+    endpoint TEXT NOT NULL UNIQUE,
+    data TEXT NOT NULL,
+    user_id INTEGER,
+    created REAL
+);
+
+CREATE TABLE IF NOT EXISTS anomalies (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    mac TEXT,
+    client TEXT,
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL,
+    acknowledged INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_anomalies_ts ON anomalies(ts);
+
+CREATE TABLE IF NOT EXISTS audit (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    username TEXT,
+    ip TEXT,
+    method TEXT,
+    path TEXT,
+    status INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit(ts);
+
+CREATE TABLE IF NOT EXISTS config_profiles (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT DEFAULT '',
+    created REAL NOT NULL,
+    data TEXT NOT NULL,
+    auto INTEGER DEFAULT 0
+);
 """
 
 
@@ -106,6 +207,13 @@ class Database:
         self._pending: deque[tuple] = deque()
 
     def _migrate(self) -> None:
+        dcols = {r[1] for r in self.conn.execute("PRAGMA table_info(devices)")}
+        for col, typ in (("parent", "TEXT"), ("auto_parent", "TEXT"), ("brand", "TEXT"), ("brand_name", "TEXT"), ("model", "TEXT"),
+                         ("friendly", "TEXT"), ("os", "TEXT"), ("services", "TEXT"), ("ports", "TEXT"), ("hypervisor", "TEXT"),
+                         ("enriched", "REAL"), ("limit_down", "REAL"), ("limit_up", "REAL"), ("kind_manual", "INTEGER DEFAULT 0"),
+                         ("dhcp_vendor", "TEXT")):
+            if col not in dcols:
+                self.conn.execute(f"ALTER TABLE devices ADD COLUMN {col} {typ}")
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(speedtests)")}
         for col, typ in (("bufferbloat", "REAL"), ("grade", "TEXT"), ("loaded_ping", "REAL")):
             if col not in cols:
@@ -176,6 +284,11 @@ class Database:
             self.conn.execute("DELETE FROM queries WHERE ts < ?", (cutoff,))
             self.conn.execute("DELETE FROM monitor WHERE ts < ?", (cutoff,))
             self.conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+            self.conn.execute("DELETE FROM traffic WHERE ts < ?", (cutoff,))
+            self.conn.execute("DELETE FROM notify_log WHERE ts < ?", (cutoff,))
+            self.conn.execute("DELETE FROM anomalies WHERE ts < ?", (cutoff,))
+            self.conn.execute("DELETE FROM audit WHERE ts < ?", (cutoff - 335 * 86400,))
+            self.conn.execute("DELETE FROM usage WHERE day < date(?, 'unixepoch')", (cutoff,))
         try:
             with self._lock:
                 self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")

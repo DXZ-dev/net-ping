@@ -54,24 +54,30 @@ def client_ip(request: Request) -> str:
 # =====================================================================
 @public.get("/auth/status")
 async def auth_status(request: Request):
-    return {"setup_required": not auth.password_set(), "authenticated": auth.check_token(request.cookies.get(auth.COOKIE)),
-            "version": __version__}
+    u = auth.current_user(request) if auth.password_set() else None
+    return {"setup_required": not auth.password_set(), "authenticated": u is not None, "version": __version__,
+            "user": auth.public_user(u) if u and not u.get("token") else (u if u else None)}
 
 
-def _set_cookie(resp: Response, request: Request):
-    resp.set_cookie(auth.COOKIE, auth.make_token(), max_age=auth.SESSION_TTL, httponly=True, samesite="strict",
+def _set_cookie(resp: Response, request: Request, user: dict):
+    resp.set_cookie(auth.COOKIE, auth.make_token(user), max_age=auth.SESSION_TTL, httponly=True, samesite="strict",
                     secure=request.url.scheme == "https")
+
+
+def me(request: Request) -> dict:
+    return request.state.user
 
 
 @public.post("/auth/setup")
 async def auth_setup(request: Request, response: Response, body: dict = Body(...)):
     if auth.password_set():
-        raise HTTPException(409, "La contraseña ya está configurada")
-    pw = body.get("password", "")
-    if len(pw) < 8:
-        raise HTTPException(400, "La contraseña debe tener al menos 8 caracteres")
-    ctx(request).settings.set("auth.password_hash", auth.hash_password(pw), notify=False)
-    _set_cookie(response, request)
+        raise HTTPException(409, "El administrador ya está configurado")
+    try:
+        auth.create_user((body.get("username") or "admin").strip(), body.get("password", ""), "admin")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    u = auth.get_user(username=(body.get("username") or "admin").strip())
+    _set_cookie(response, request, u)
     return {"ok": True}
 
 
@@ -79,11 +85,20 @@ async def auth_setup(request: Request, response: Response, body: dict = Body(...
 async def auth_login(request: Request, response: Response, body: dict = Body(...)):
     ip = client_ip(request)
     auth.throttle(ip)
-    if not auth.verify_password(body.get("password", ""), ctx(request).settings.get("auth.password_hash") or ""):
+    u = auth.get_user(username=(body.get("username") or "admin").strip())
+    if not u or not auth.verify_password(body.get("password", ""), u["password_hash"]):
         auth.record_failure(ip)
         await asyncio.sleep(0.8)
-        raise HTTPException(401, "Contraseña incorrecta")
-    _set_cookie(response, request)
+        raise HTTPException(401, "Usuario o contraseña incorrectos")
+    if u["totp_enabled"]:
+        code = (body.get("code") or "").strip()
+        if not code:
+            return {"ok": False, "totp_required": True}
+        if not auth.totp_verify(u["totp_secret"], code):
+            auth.record_failure(ip)
+            raise HTTPException(401, "Código de verificación incorrecto")
+    ctx(request).db.execute("UPDATE users SET last_login=? WHERE id=?", (time.time(), u["id"]))
+    _set_cookie(response, request, u)
     return {"ok": True}
 
 
@@ -93,15 +108,122 @@ async def auth_logout(response: Response):
     return {"ok": True}
 
 
+def _real_user(request: Request) -> dict:
+    u = me(request)
+    if u.get("token"):
+        raise HTTPException(400, "Acción no disponible con un token de API")
+    return auth.get_user(uid=u["id"])
+
+
 @api.post("/auth/password")
 async def change_password(request: Request, response: Response, body: dict = Body(...)):
-    c = ctx(request)
-    if not auth.verify_password(body.get("current", ""), c.settings.get("auth.password_hash")):
+    u = _real_user(request)
+    if not auth.verify_password(body.get("current", ""), u["password_hash"]):
         raise HTTPException(400, "La contraseña actual no es correcta")
     if len(body.get("new", "")) < 8:
         raise HTTPException(400, "Mínimo 8 caracteres")
-    c.settings.set("auth.password_hash", auth.hash_password(body["new"]), notify=False)
-    _set_cookie(response, request)
+    ctx(request).db.execute("UPDATE users SET password_hash=? WHERE id=?", (auth.hash_password(body["new"]), u["id"]))
+    _set_cookie(response, request, auth.get_user(uid=u["id"]))
+    return {"ok": True}
+
+
+@api.post("/auth/2fa/setup")
+async def totp_setup(request: Request):
+    u = _real_user(request)
+    secret = auth.totp_secret()
+    ctx(request).db.execute("UPDATE users SET totp_secret=? WHERE id=? AND totp_enabled=0", (secret, u["id"]))
+    from .wireguard import qr_svg
+    uri = auth.totp_uri(secret, u["username"])
+    return {"secret": secret, "uri": uri, "qr": qr_svg(uri)}
+
+
+@api.post("/auth/2fa/enable")
+async def totp_enable(request: Request, response: Response, body: dict = Body(...)):
+    u = _real_user(request)
+    if not u["totp_secret"] or not auth.totp_verify(u["totp_secret"], body.get("code", "")):
+        raise HTTPException(400, "Código incorrecto. Comprueba la hora del móvil.")
+    ctx(request).db.execute("UPDATE users SET totp_enabled=1 WHERE id=?", (u["id"],))
+    _set_cookie(response, request, auth.get_user(uid=u["id"]))
+    return {"ok": True}
+
+
+@api.post("/auth/2fa/disable")
+async def totp_disable(request: Request, response: Response, body: dict = Body(...)):
+    u = _real_user(request)
+    if not auth.verify_password(body.get("password", ""), u["password_hash"]):
+        raise HTTPException(400, "Contraseña incorrecta")
+    ctx(request).db.execute("UPDATE users SET totp_enabled=0, totp_secret=NULL WHERE id=?", (u["id"],))
+    _set_cookie(response, request, auth.get_user(uid=u["id"]))
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- usuarios y tokens (admin)
+@api.get("/users")
+async def users_list(request: Request):
+    rows = await ctx(request).db.aquery("SELECT * FROM users ORDER BY id")
+    return [auth.public_user(r) for r in rows]
+
+
+@api.post("/users")
+async def users_create(request: Request, body: dict = Body(...)):
+    try:
+        return auth.create_user((body.get("username") or "").strip(), body.get("password", ""), body.get("role", "parent"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@api.patch("/users/{uid}")
+async def users_update(request: Request, uid: int, body: dict = Body(...)):
+    c = ctx(request)
+    u = auth.get_user(uid=uid)
+    if not u:
+        raise HTTPException(404, "Usuario no encontrado")
+    if "role" in body:
+        if body["role"] not in auth.ROLES:
+            raise HTTPException(400, "Rol inválido")
+        if u["role"] == "admin" and body["role"] != "admin" and c.db.scalar("SELECT COUNT(*) FROM users WHERE role='admin'") <= 1:
+            raise HTTPException(400, "Debe quedar al menos un administrador")
+        c.db.execute("UPDATE users SET role=? WHERE id=?", (body["role"], uid))
+    if body.get("password"):
+        if len(body["password"]) < 8:
+            raise HTTPException(400, "Mínimo 8 caracteres")
+        c.db.execute("UPDATE users SET password_hash=? WHERE id=?", (auth.hash_password(body["password"]), uid))
+    if body.get("reset_2fa"):
+        c.db.execute("UPDATE users SET totp_enabled=0, totp_secret=NULL WHERE id=?", (uid,))
+    return auth.public_user(auth.get_user(uid=uid))
+
+
+@api.delete("/users/{uid}")
+async def users_delete(request: Request, uid: int):
+    c = ctx(request)
+    u = auth.get_user(uid=uid)
+    if not u:
+        raise HTTPException(404)
+    if u["id"] == me(request).get("id"):
+        raise HTTPException(400, "No puedes eliminar tu propio usuario")
+    if u["role"] == "admin" and c.db.scalar("SELECT COUNT(*) FROM users WHERE role='admin'") <= 1:
+        raise HTTPException(400, "Debe quedar al menos un administrador")
+    c.db.execute("DELETE FROM users WHERE id=?", (uid,))
+    return {"ok": True}
+
+
+@api.get("/tokens")
+async def tokens_list(request: Request):
+    return await ctx(request).db.aquery("SELECT id,name,role,created,last_used FROM api_tokens ORDER BY id")
+
+
+@api.post("/tokens")
+async def tokens_create(request: Request, body: dict = Body(...)):
+    try:
+        token = auth.create_api_token((body.get("name") or "token").strip(), body.get("role", "viewer"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"token": token}
+
+
+@api.delete("/tokens/{tid}")
+async def tokens_delete(request: Request, tid: int):
+    ctx(request).db.execute("DELETE FROM api_tokens WHERE id=?", (tid,))
     return {"ok": True}
 
 
@@ -461,6 +583,11 @@ def create_profile(c, body: dict) -> dict:
                     schedules=[{"label": "Deberes", "days": [0, 1, 2, 3, 4], "start": "16:00", "end": "19:00", "action": "block_services",
                                 "services": ["tiktok", "instagram", "fortnite", "roblox", "youtube", "twitch"], "enabled": True},
                                {"label": "Noche", "days": list(range(7)), "start": "23:30", "end": "07:00", "action": "block_all", "services": [], "enabled": True}])
+    elif tpl == "work":
+        prof.update(color="#0ea5e9", adult_filter=True, blocked_services=["gambling", "tinder", "vpn_proxy", "public_doh"],
+                    schedules=[{"label": "Horario laboral", "days": [0, 1, 2, 3, 4], "start": "09:00", "end": "18:00", "action": "block_services",
+                                "services": ["tiktok", "instagram", "facebook", "snapchat", "twitch", "netflix", "fortnite", "roblox", "steam",
+                                             "disneyplus", "primevideo", "hbomax", "kick"], "enabled": True}])
     elif tpl == "gamer":
         prof.update(color="#22c55e", adult_filter=False, blocked_services=["vpn_proxy"], threat_protection=True)
     elif tpl == "guest":
@@ -510,16 +637,42 @@ async def devices_list(request: Request):
         f"SELECT client, COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked, MAX(ts) last FROM queries WHERE ts>=? GROUP BY client", (since,))}
     out = []
     now = time.time()
+    rates = getattr(c.router, "rates", {})
     for d in c.devices.devices.values():
         q = counts.get(d.get("ip") or "", {})
         pol = c.devices.policy_for(d["ip"]) if d.get("ip") else None
         out.append({**d, "queries": q.get("n", 0), "blocked": q.get("blocked", 0), "last_query": q.get("last"),
+                    "parent_effective": d.get("parent") or d.get("auto_parent"),
+                    "services": json.loads(d.get("services") or "[]"), "ports": json.loads(d.get("ports") or "[]"),
+                    "rate": rates.get(d["mac"]),
                     "online": bool(d.get("online")) or (now - c.devices.activity.get(d.get("ip") or "", 0) < 600),
                     "internet_blocked": bool(pol and pol.block_all), "block_reason": pol.block_reason if pol else "",
                     "is_gateway": d.get("ip") == c.devices.gateway, "is_self": d.get("ip") == c.devices.self_ip})
     out.sort(key=lambda x: (not x["online"], tuple(int(p) for p in (x.get("ip") or "999.999.999.999").split(".")) if (x.get("ip") or "").count(".") == 3 else (999,)))
     return {"devices": out, "scanning": c.devices.scanning, "last_scan": c.devices.last_scan, "gateway": c.devices.gateway,
             "self_ip": c.devices.self_ip}
+
+
+@api.get("/devices/stream")
+async def devices_stream(request: Request):
+    """Eventos en tiempo real (SSE): dispositivo nuevo, conectado, desconectado, actualizado."""
+    c = ctx(request)
+    q = c.devices.subscribe()
+
+    async def gen():
+        try:
+            yield ": conectado\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    ev = await asyncio.wait_for(q.get(), 15)
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+        finally:
+            c.devices.unsubscribe(q)
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
 
 
 @api.post("/devices/scan")

@@ -13,13 +13,14 @@ from ..catalog import SAFESEARCH, SERVICE_MAP, YOUTUBE_RESTRICT
 log = logging.getLogger("netping.filter")
 
 # Códigos de estado del registro de consultas
-ST_OK, ST_CACHE, ST_LIST, ST_RULE, ST_SERVICE, ST_DEVICE, ST_LOCAL, ST_SAFE, ST_ERROR, ST_REGEX, ST_STALE = range(11)
+ST_OK, ST_CACHE, ST_LIST, ST_RULE, ST_SERVICE, ST_DEVICE, ST_LOCAL, ST_SAFE, ST_ERROR, ST_REGEX, ST_STALE, ST_GEO, ST_REBIND, ST_TLD = range(14)
 STATUS_NAMES = {
     ST_OK: "Permitida", ST_CACHE: "Caché", ST_LIST: "Bloqueada (lista)", ST_RULE: "Bloqueada (regla)",
     ST_SERVICE: "Bloqueada (app)", ST_DEVICE: "Bloqueada (control parental)", ST_LOCAL: "Registro local",
     ST_SAFE: "Búsqueda segura", ST_ERROR: "Error", ST_REGEX: "Bloqueada (regex)", ST_STALE: "Caché optimista",
+    ST_GEO: "Bloqueada (país)", ST_REBIND: "Bloqueada (rebinding)", ST_TLD: "Bloqueada (TLD)",
 }
-BLOCKED_STATUSES = (ST_LIST, ST_RULE, ST_SERVICE, ST_DEVICE, ST_REGEX)
+BLOCKED_STATUSES = (ST_LIST, ST_RULE, ST_SERVICE, ST_DEVICE, ST_REGEX, ST_GEO, ST_REBIND, ST_TLD)
 
 CAT_ADS, CAT_SECURITY, CAT_ADULT, CAT_CUSTOM = 1, 2, 4, 8
 CATEGORY_BITS = {"ads": CAT_ADS, "security": CAT_SECURITY, "adult": CAT_ADULT, "custom": CAT_CUSTOM}
@@ -135,6 +136,7 @@ class FilterEngine:
     def __init__(self):
         self.d = _Data()
         self.protected: set[str] = set()  # infraestructura de juegos/streaming
+        self.blocked_tlds: set[str] = set()
         self._build_service_index(self.d)
 
     @staticmethod
@@ -210,6 +212,9 @@ class FilterEngine:
                 out |= ids
         return out
 
+    def services_for(self, name: str) -> set:
+        return self._services_for(name)
+
     def is_allowed(self, name: str) -> str | None:
         d = self.d
         for s in suffixes(name):
@@ -236,6 +241,10 @@ class FilterEngine:
                         return Decision(ST_SERVICE, f"App: {SERVICE_MAP[next(iter(hit))]['name']}")
             protected = bool(self.protected) and any(s in self.protected for s in suffixes(name))
             if blocking_enabled and not protected:
+                if self.blocked_tlds:
+                    tld = name.rsplit(".", 1)[-1]
+                    if tld in self.blocked_tlds:
+                        return Decision(ST_TLD, f"TLD bloqueado: .{tld}")
                 d = self.d
                 for s in suffixes(name):
                     if s in d.deny_wild:

@@ -14,7 +14,7 @@ from dnslib import AAAA, CNAME, PTR, QTYPE, RCODE, RR, A, DNSRecord, DNSQuestion
 
 from ..catalog import DOH_CANARY, ICLOUD_RELAY
 from .cache import DNSCache
-from .filter import (BLOCKED_STATUSES, ST_CACHE, ST_DEVICE, ST_ERROR, ST_LOCAL, ST_OK, ST_SAFE,
+from .filter import (BLOCKED_STATUSES, ST_CACHE, ST_DEVICE, ST_ERROR, ST_GEO, ST_LIST, ST_LOCAL, ST_OK, ST_REBIND, ST_SAFE,
                      ST_STALE, Decision, FilterEngine, Policy)
 from .upstream import UpstreamPool, query_server
 
@@ -69,6 +69,16 @@ class DNSServer:
         self.self_ip: Callable[[], str | None] = lambda: None
         self.on_query: Callable[[tuple], None] = lambda row: None
         self.on_client: Callable[[str], None] = lambda ip: None
+        self.on_usage: Callable[[str, str, bool], None] = lambda ip, name, blocked: None
+        self.on_threat: Callable[[str, str], None] = lambda ip, name: None
+        self.name_lookup: Callable[[str], str | None] = lambda name: None
+        # protección por país / rebinding
+        self.geo = None
+        self.blocked_countries: set = set()
+        self.rebind_protection = True
+        self.rebind_allow: set = set()
+        self.listening: list[str] = []
+        self.local_tlds: set = {"lan", "home", "local", "internal", "localdomain"}
         # configuración dinámica
         self.blocking_enabled = True
         self.global_services: set = set()
@@ -107,24 +117,48 @@ class DNSServer:
         self.local = local
 
     # ---- arranque -----------------------------------------------------------
-    async def start(self, host: str, port: int) -> None:
+    async def start(self, host: str, port: int, ipv6: bool = True) -> None:
         loop = asyncio.get_running_loop()
         hosts = [host]
+        if ipv6 and host in ("0.0.0.0", "") and socket.has_ipv6:
+            hosts.append("::")
         for h in hosts:
-            family = socket.AF_INET6 if ":" in h else socket.AF_INET
-            transport, _ = await loop.create_datagram_endpoint(
-                lambda: _UDPServer(self), local_addr=(h, port), family=family, reuse_port=False
-            )
-            sock = transport.get_extra_info("socket")
+            v6 = ":" in h
+            family = socket.AF_INET6 if v6 else socket.AF_INET
             try:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+                usock = socket.socket(family, socket.SOCK_DGRAM)
+                tsock = socket.socket(family, socket.SOCK_STREAM)
+                for s_ in (usock, tsock):
+                    s_.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    if v6:
+                        s_.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+                try:
+                    usock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+                except OSError:
+                    pass
+                usock.bind((h, port))
+                tsock.bind((h, port))
+                tsock.listen(128)
+                usock.setblocking(False)
+                tsock.setblocking(False)
             except OSError:
-                pass
+                if not v6:
+                    raise
+                log.info("IPv6 no disponible para el DNS; sólo IPv4")
+                continue
+            transport, _ = await loop.create_datagram_endpoint(lambda: _UDPServer(self), sock=usock)
             self._transports.append(transport)
-            srv = await asyncio.start_server(self._tcp_client, h, port, family=family, reuse_address=True)
-            self._servers.append(srv)
-        log.info("DNS escuchando en %s:%s (UDP/TCP)", host, port)
+            self._servers.append(await asyncio.start_server(self._tcp_client, sock=tsock))
+            self.listening.append(f"[{h}]:{port}" if v6 else f"{h}:{port}")
+        log.info("DNS escuchando en %s (UDP/TCP)", ", ".join(self.listening))
         self._ticker = asyncio.create_task(self._tick())
+
+    async def start_dot(self, port: int, ssl_ctx) -> None:
+        """DNS-over-TLS (RFC 7858) para dispositivos con «DNS privado»."""
+        srv = await asyncio.start_server(self._tcp_client, "0.0.0.0", port, ssl=ssl_ctx, reuse_address=True)
+        self._servers.append(srv)
+        self.listening.append(f"DoT 0.0.0.0:{port}")
+        log.info("DNS-over-TLS escuchando en el puerto %s", port)
 
     async def stop(self) -> None:
         for t in self._transports:
@@ -213,6 +247,10 @@ class DNSServer:
         elapsed = (time.perf_counter() - t0) * 1000
         self.total += 1
         self._cur_count += 1
+        try:
+            self.on_usage(client_ip, name, status in BLOCKED_STATUSES)
+        except Exception:  # pragma: no cover
+            pass
         if status in BLOCKED_STATUSES:
             self.blocked += 1
         elif status in (ST_CACHE, ST_STALE):
@@ -230,6 +268,12 @@ class DNSServer:
                 r = req.reply()
                 r.add_answer(RR(req.q.qname, QTYPE.A, rdata=A(ip), ttl=300))
                 return r, ST_LOCAL, "NetPing", "local"
+        if qtype == QTYPE.A and ("." not in name or name.rsplit(".", 1)[-1] in self.local_tlds):
+            dyn = self.name_lookup(name)
+            if dyn:
+                r = req.reply()
+                r.add_answer(RR(req.q.qname, QTYPE.A, rdata=A(dyn), ttl=60))
+                return r, ST_LOCAL, "Equipo DHCP", "local"
         local = self.local.get((name, qtype)) or self.local.get((name, QTYPE.CNAME))
         if local:
             r = req.reply()
@@ -272,12 +316,49 @@ class DNSServer:
         decision = self.engine.check(name, policy, self.blocking_enabled, self.global_services)
         if decision is not None:
             if decision.blocked:
+                if decision.status == ST_LIST and "seguridad" in decision.reason:
+                    self.on_threat(client_ip, name)
                 return self._blocked_reply(req, qtype), decision.status, decision.reason, ""
             if decision.cname:
                 return await self._cname_reply(req, decision, qtype)
 
-        # 6) caché + upstream
-        return await self._cached_or_forward(req, name, qtype)
+        # 6) caché + upstream, y comprobación de las IP devueltas (país / rebinding)
+        result = await self._cached_or_forward(req, name, qtype)
+        if qtype in (QTYPE.A, QTYPE.AAAA) and (self.rebind_protection or self.blocked_countries):
+            post = self._post_check(name, result[0])
+            if post:
+                return self._blocked_reply(req, qtype), post[0], post[1], result[3]
+        return result
+
+    _REBIND_SAFE = ("lan", "local", "home.arpa", "internal", "localdomain", "plex.direct", "nip.io", "sslip.io", "fritz.box")
+
+    def _post_check(self, name: str, reply) -> tuple[int, str] | None:
+        try:
+            rec = reply if isinstance(reply, DNSRecord) else DNSRecord.parse(reply)
+        except Exception:
+            return None
+        ips = [str(rr.rdata) for rr in rec.rr if rr.rtype in (QTYPE.A, QTYPE.AAAA)]
+        if not ips:
+            return None
+        if self.rebind_protection:
+            safe = any(name == s or name.endswith("." + s) for s in (*self._REBIND_SAFE, *self.rebind_allow))
+            cf = (self.cf.get("domain") or "").strip(".")
+            if cf and (name == cf or name.endswith("." + cf)):
+                safe = True
+            if not safe:
+                for ip in ips:
+                    try:
+                        a = ipaddress.ip_address(ip)
+                    except ValueError:
+                        continue
+                    if (a.is_private or a.is_loopback or a.is_link_local) and not a.is_unspecified:
+                        return ST_REBIND, f"Dominio público apunta a IP interna ({ip})"
+        if self.blocked_countries and self.geo is not None:
+            for ip in ips:
+                cc = self.geo.country(ip)
+                if cc and cc in self.blocked_countries:
+                    return ST_GEO, f"Servidor en país bloqueado ({cc})"
+        return None
 
     def _blocked_reply(self, req: DNSRecord, qtype: int) -> DNSRecord:
         r = req.reply()

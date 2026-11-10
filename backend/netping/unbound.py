@@ -126,6 +126,7 @@ class UnboundManager:
         self.last_error = ""
         self._stop = False
         self._supervisor: asyncio.Task | None = None
+        self.on_crash = None
 
     @property
     def available(self) -> bool:
@@ -207,6 +208,8 @@ class UnboundManager:
                 break
             self.last_error = f"Unbound terminó con código {code}"
             log.warning(self.last_error)
+            if self.on_crash:
+                self.on_crash(self.last_error)
             self.restarts += 1
             await asyncio.sleep(backoff)
             backoff = 1 if time.time() - self.started_at > 60 else min(backoff * 2, 60)

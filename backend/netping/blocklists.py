@@ -28,6 +28,7 @@ class BlocklistManager:
         self._lock = asyncio.Lock()
         self.last_build: dict = {}
         self.updating = False
+        self.on_failure = None
 
     def path_for(self, list_id: int) -> Path:
         return self.dir / f"{list_id}.txt"
@@ -35,12 +36,12 @@ class BlocklistManager:
     def seed_defaults(self) -> None:
         if self.db.scalar("SELECT COUNT(*) FROM blocklists"):
             return
+        # todas las listas recomendadas aparecen DESACTIVADAS: el usuario elige en el registro cuáles activar
         for item in RECOMMENDED_LISTS:
-            if item["default"]:
-                self.db.execute(
-                    "INSERT OR IGNORE INTO blocklists(url,name,category,enabled) VALUES (?,?,?,1)",
-                    (item["url"], item["name"], item["category"]),
-                )
+            self.db.execute(
+                "INSERT OR IGNORE INTO blocklists(url,name,category,enabled) VALUES (?,?,?,0)",
+                (item["url"], item["name"], item["category"]),
+            )
 
     async def rebuild(self) -> dict:
         lists = await self.db.aquery("SELECT id, category FROM blocklists WHERE enabled=1")
@@ -102,6 +103,8 @@ class BlocklistManager:
                     else:
                         await self.db.aexecute("UPDATE blocklists SET last_status=? WHERE id=?", (msg, row["id"]))
                         self.db.event("warning", "listas", f"No se pudo actualizar «{row['name']}»: {msg}")
+                        if self.on_failure:
+                            self.on_failure(row["name"], msg)
                     results.append({"id": row["id"], "name": row["name"], "ok": ok, "message": msg, "domains": count})
                 if rebuild:
                     await self.rebuild()
