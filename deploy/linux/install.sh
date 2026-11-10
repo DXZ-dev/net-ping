@@ -88,9 +88,15 @@ rm -rf /opt/netping
 if systemctl list-unit-files unbound.service >/dev/null 2>&1; then
   systemctl disable --now unbound >/dev/null 2>&1 || true
 fi
-if [[ "$DNS_PORT" == "53" && $UPDATE -eq 0 ]]; then
-  c_info "Comprobando el puerto 53…"
-  bash "$REPO_DIR/deploy/linux/free-port-53.sh" || c_warn "Revisa qué servicio usa el puerto 53 antes de continuar"
+if [[ "$DNS_PORT" == "53" ]]; then
+  c_info "Liberando el puerto 53…"
+  # Nuestro propio servicio se reinicia al final: se detiene para que no cuente como conflicto.
+  systemctl stop bipon-net >/dev/null 2>&1 || true
+  if bash "$REPO_DIR/deploy/linux/free-port-53.sh"; then
+    c_ok "Puerto 53 libre"
+  else
+    c_warn "El puerto 53 sigue ocupado (ver arriba): Bipon Net arrancará, pero sin DNS hasta que lo liberes"
+  fi
 fi
 
 # ---------------------------------------------------------------- código (copia git para las actualizaciones)
