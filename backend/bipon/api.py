@@ -906,6 +906,29 @@ async def unbound_optimize(request: Request):
     return {"ok": True, "message": "Unbound optimizado: " + msg}
 
 
+@api.get("/unbound/auto")
+async def unbound_auto_get(request: Request):
+    st = ctx(request).settings.get("unbound_auto") or {}
+    return {"enabled": bool(st.get("enabled")), "last": st.get("last")}
+
+
+@api.post("/unbound/auto")
+async def unbound_auto_run(request: Request, body: dict = Body(default={})):
+    """Mide los DNS más cercanos desde tu ubicación y autoconfigura Unbound (también por hardware)."""
+    from . import unbound_auto
+    c = ctx(request)
+    if "enabled" in body:
+        st = c.settings.get("unbound_auto") or {}
+        st["enabled"] = bool(body["enabled"])
+        c.settings.set("unbound_auto", st, notify=False)
+    if body.get("run", True):
+        r = await unbound_auto.auto_configure(c, apply=bool(body.get("apply", True)))
+        if r.get("error"):
+            raise HTTPException(400, r["error"])
+        return {"enabled": bool((c.settings.get("unbound_auto") or {}).get("enabled")), "last": r}
+    return await unbound_auto_get(request)
+
+
 @api.post("/unbound/{action}")
 async def unbound_action(request: Request, action: str):
     c = ctx(request)

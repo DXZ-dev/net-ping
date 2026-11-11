@@ -1788,10 +1788,23 @@ export const EN = {
   "Perfiles, horarios, pausa de Internet y tiempo de pantalla.": "Profiles, schedules, Internet pause and screen time.",
   "Todo a la vista": "Everything in view",
   "Dispositivos en tiempo real, calidad de conexión y avisos.": "Real-time devices, connection quality and alerts.",
-  "Privacidad": "Privacy"
+  "Privacidad": "Privacy",
+  "Autoconfiguración por ubicación": "Location-based autoconfiguration",
+  "Mide desde tu red los DNS cifrados más cercanos (anycast), elige los 2 más rápidos y fiables y ajusta hilos y caché a este equipo. Después, las respuestas salen de la caché local de Unbound en menos de 1 ms.": "Measures the nearest encrypted DNS (anycast) from your network, picks the 2 fastest and most reliable and tunes threads and cache to this machine. Afterwards, answers come from Unbound's local cache in under 1 ms.",
+  "Autoconfigurar ahora": "Autoconfigure now",
+  "Reajustar cada día": "Re-tune every day",
+  "Si tu proveedor cambia la ruta, Unbound se adapta solo.": "If your ISP changes the route, Unbound adapts on its own.",
+  "Sólo ajustar al hardware": "Only tune to the hardware",
+  "Aún no se ha ejecutado.": "Not run yet.",
+  "Proveedor": "Provider",
+  "Con caché": "Cached",
+  "Midiendo los DNS más cercanos desde tu ubicación… (≈10-20 s)": "Measuring the nearest DNS from your location… (≈10-20 s)",
+  "Unbound autoconfigurado": "Unbound autoconfigured"
 };
 
 export const EN_PATTERNS = [
+  [/^Reenvío cifrado \(DoT\) a los más rápidos desde tu ubicación: (.+)$/, "Encrypted forwarding (DoT) to the fastest from your location: $1"],
+  [/^Tu red bloquea DNS cifrado \(puerto 853\): reenvío simple a (.+)$/, "Your network blocks encrypted DNS (port 853): plain forwarding to $1"],
   [/^Caché de (Unbound|Bipon) al (\d+) %: (.+) → (\d+) %$/, "$1 cache at $2 %: $3 → $4 %"],
   [/^mensajes (.+) \/ (.+) · registros (.+) \/ (.+)$/, "messages $1 / $2 · records $3 / $4"],
   [/^Límite aplicado · (.+)$/, "Limit applied · $1"],

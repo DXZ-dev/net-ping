@@ -87,7 +87,7 @@ DEFAULTS: dict[str, Any] = {
         "prefetch_key": True,
         "serve_expired": True,
         "serve_expired_ttl": 86400,
-        "serve_expired_client_timeout": 1800,
+        "serve_expired_client_timeout": 0,  # 0 = dato guardado al instante, refresco por detrás
         "qname_minimisation": True,
         "aggressive_nsec": True,
         "num_threads": 1,

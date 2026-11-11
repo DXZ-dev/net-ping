@@ -166,6 +166,14 @@ async def complete_setup(ctx, body: dict) -> dict:
                 await ctx.advisor.apply([x["id"] for x in r["recommendations"] if x.get("auto")])
             except Exception as exc:  # pragma: no cover
                 log.warning("autoconfiguración: %s", exc)
+            try:  # Unbound: DNS más cercanos desde tu ubicación + ajuste al hardware, y re-ajuste diario
+                from . import unbound_auto
+                st = ctx.settings.get("unbound_auto") or {}
+                ctx.settings.set("unbound_auto", {**st, "enabled": True}, notify=False)
+                if ctx.unbound.available:
+                    await unbound_auto.auto_configure(ctx, apply=True)
+            except Exception as exc:  # pragma: no cover
+                log.warning("autoconfiguración de Unbound: %s", exc)
         asyncio.create_task(run_advisor())
         notes.append("Autoconfiguración en curso: el asistente está analizando tu red y aplicará lo mejor para ti (≈1 min).")
 

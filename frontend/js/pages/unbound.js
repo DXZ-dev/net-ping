@@ -58,9 +58,12 @@ export async function render(el, app) {
       </form>
       <div class="col">
         <div class="card" id="cg"></div>
-        <div class="card"><header><h3>${ico("zap")}Optimización automática</h3></header>
-          <p class="small muted mb">Ajusta hilos y tamaños de caché al hardware de este equipo, y activa prefetch, serve-expired y los endurecimientos recomendados.</p>
-          <button class="btn primary" id="opt-ub">${ico("zap")}Optimizar para mi hardware</button></div>
+        <div class="card" id="ub-auto"><header><h3>${ico("globe")}Autoconfiguración por ubicación</h3></header>
+          <p class="small muted mb">Mide desde tu red los DNS cifrados más cercanos (anycast), elige los 2 más rápidos y fiables y ajusta hilos y caché a este equipo. Después, las respuestas salen de la caché local de Unbound en menos de 1 ms.</p>
+          <button class="btn primary" id="ub-geo">${ico("zap")}Autoconfigurar ahora</button>
+          <div class="opt mt"><div class="t"><b>Reajustar cada día</b><span>Si tu proveedor cambia la ruta, Unbound se adapta solo.</span></div>${toggle("ub-daily", false)}</div>
+          <div id="ub-geo-out" class="mt"></div>
+          <details class="mt small"><summary>Sólo ajustar al hardware</summary><button class="btn sm mt" id="opt-ub">${ico("server")}Optimizar para mi hardware</button></details></div>
         <div class="card"><header><h3>${ico("power")}Acciones</h3></header>
           <div class="col">
             <button class="btn" data-a="restart">${ico("refresh")}Reiniciar Unbound</button>
@@ -76,6 +79,7 @@ export async function render(el, app) {
     </div>`;
 
   drawGuard(el.querySelector("#cg"));
+  drawAuto(el.querySelector("#ub-auto"), app);
   el.querySelector("#opt-ub").onclick = async (e) => {
     const r = await api.get("/unbound/recommend").catch(() => null);
     if (!r) return;
@@ -127,4 +131,26 @@ async function drawGuard(box) {
   box.querySelector("#cg-save").onclick = (e) => busy(e.currentTarget, () => api.put("/cacheguard", { enabled: box.querySelector("[name=cg-on]").checked, threshold: Number(box.querySelector("#cg-thr").value) }))
     .then(() => { toast("Guardado"); drawGuard(box); }).catch(() => {});
   box.querySelector("#cg-now").onclick = (e) => busy(e.currentTarget, () => api.post("/cacheguard/clean")).then(() => { toast("Cachés limpiadas y DNS de juegos precalentado"); drawGuard(box); }).catch(() => {});
+}
+
+// Autoconfiguración por ubicación: DNS más cercanos + hardware, con la tabla de mediciones
+async function drawAuto(box, app) {
+  if (!box) return;
+  const out = box.querySelector("#ub-geo-out");
+  const show = (a) => {
+    box.querySelector("[name=ub-daily]").checked = !!a.enabled;
+    const l = a.last;
+    if (!l) { out.innerHTML = `<p class="small muted">Aún no se ha ejecutado.</p>`; return; }
+    const rows = (l.dot || []).filter((r) => r.median != null).slice(0, 8);
+    out.innerHTML = `<div class="alert ${l.applied ? "ok" : "info"} small">${ico(l.applied ? "check" : "info")}<div><b>${esc(l.reason || "")}</b><br><span class="muted">${ago(l.ts)}</span></div></div>
+      ${rows.length ? `<div class="table-wrap mt"><table><thead><tr><th>Proveedor</th><th>IP</th><th class="right">Con caché</th><th class="right">En frío</th><th class="right">Fiabilidad</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr${(l.chosen || []).includes(r.provider) ? ' style="font-weight:600"' : ""}><td>${esc(r.name)}</td><td class="mono small">${esc(r.ip)}</td><td class="right">${r.median} ms</td><td class="right">${r.cold ?? "—"} ms</td><td class="right">${r.reliability} %</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+  };
+  show(await api.get("/unbound/auto").catch(() => ({})));
+  box.querySelector("#ub-geo").onclick = (e) => busy(e.currentTarget, async () => {
+    out.innerHTML = `<p class="small muted">Midiendo los DNS más cercanos desde tu ubicación… (≈10-20 s)</p>`;
+    const r = await api.post("/unbound/auto", { run: true, apply: true, enabled: box.querySelector("[name=ub-daily]").checked });
+    show(r); toast("Unbound autoconfigurado"); setTimeout(() => app.reload(), 1500);
+  }).catch(() => {});
+  box.querySelector("[name=ub-daily]").onchange = (e) => api.post("/unbound/auto", { run: false, enabled: e.target.checked }).then(() => toast("Guardado")).catch(() => {});
 }

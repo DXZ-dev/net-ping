@@ -82,6 +82,13 @@ async def dns_lookup(name: str, qtype: str, server: str) -> dict:
 # ------------------------------------------------------------ DNS benchmark
 async def _bench_one(server: str, domains: list[str], http: httpx.AsyncClient) -> dict:
     cached, uncached, fails = [], [], 0
+    # 1ª pasada: llena la caché del resolver (los públicos ya la tienen caliente por millones de usuarios;
+    # un resolver propio como Unbound no). 2ª pasada: se mide → comparación justa «con caché».
+    for d in domains:
+        try:
+            await query_server(server, DNSRecord.question(d, "A").pack(), timeout=2.0, http=http)
+        except Exception:
+            pass
     for d in domains:
         wire = DNSRecord.question(d, "A").pack()
         try:
@@ -89,7 +96,7 @@ async def _bench_one(server: str, domains: list[str], http: httpx.AsyncClient) -
             if not _usable(resp):
                 fails += 1
                 continue
-            cached.append(rtt)  # dominio popular: casi siempre en caché del resolver
+            cached.append(rtt)
         except Exception:
             fails += 1
     for _ in range(4):

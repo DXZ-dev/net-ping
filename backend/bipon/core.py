@@ -237,6 +237,9 @@ class Context:
         self._bg(self.lag.loop(), "vigilante de lag")
         self._bg(self.cacheguard.loop(), "guardián de caché")
         self._bg(self.quality.loop(), "calidad de conexión")
+        from . import unbound_auto
+        self._bg(unbound_auto.loop(self), "autoajuste de Unbound")
+        self._bg(self.unbound.persist_loop(), "caché persistente de Unbound")
         self._bg(self.updater.loop(), "actualizaciones")
         self._bg(self.captive.loop(), "portal cautivo")
         self.db.event("info", "sistema", "Bipon Net iniciado")

@@ -65,7 +65,7 @@ def render_config(cfg: dict, base: Path) -> str:
         f"    prefetch-key: {_yn(cfg.get('prefetch_key', True))}",
         f"    serve-expired: {_yn(cfg.get('serve_expired', True))}",
         f"    serve-expired-ttl: {int(cfg.get('serve_expired_ttl', 86400))}",
-        f"    serve-expired-client-timeout: {int(cfg.get('serve_expired_client_timeout', 1800))}",
+        f"    serve-expired-client-timeout: {int(cfg.get('serve_expired_client_timeout', 0))}",
         f"    qname-minimisation: {_yn(cfg.get('qname_minimisation', True))}",
         f"    aggressive-nsec: {_yn(cfg.get('aggressive_nsec', True))}",
         f"    hide-identity: {_yn(cfg.get('hide_identity', True))}",
@@ -109,7 +109,10 @@ def render_config(cfg: dict, base: Path) -> str:
             lines.append(f"    forward-addr: {s}")
     custom = (cfg.get("custom") or "").strip()
     if custom:
-        lines += ["", "# --- configuración personalizada ---", custom]
+        # se reabre «server:» (Unbound admite varios bloques): así la configuración avanzada nunca cae dentro
+        # de remote-control o forward-zone, que la invalidaría
+        body = "\n".join("    " + ln.strip() if ln.strip() and not ln.startswith((" ", "\t")) else ln for ln in custom.splitlines())
+        lines += ["", "# --- configuración personalizada ---", "server:", body]
     return "\n".join(lines) + "\n"
 
 
@@ -190,6 +193,7 @@ class UnboundManager:
             return
         if self._supervisor is None or self._supervisor.done():
             self._supervisor = asyncio.create_task(self._supervise())
+            asyncio.create_task(self.load_cache())
 
     async def _supervise(self) -> None:
         backoff = 1
@@ -214,7 +218,58 @@ class UnboundManager:
             await asyncio.sleep(backoff)
             backoff = 1 if time.time() - self.started_at > 60 else min(backoff * 2, 60)
 
+    # ---- caché persistente: lo aprendido sobrevive a reinicios y actualizaciones
+    @property
+    def cache_file(self) -> Path:
+        return self.base / "cache.dump"
+
+    async def dump_cache(self) -> int:
+        """Guarda la caché de Unbound en disco. Devuelve el nº de líneas guardadas."""
+        ctl = self._bin("unbound-control")
+        if not ctl or not self.running:
+            return 0
+        code, out = await self._run(ctl, "-c", str(self.conf), "dump_cache", timeout=60)
+        if code != 0 or "END_RRSET_CACHE" not in out:
+            return 0
+        tmp = self.cache_file.with_suffix(".tmp")
+        tmp.write_text(out)
+        tmp.replace(self.cache_file)
+        return out.count("\n")
+
+    async def load_cache(self) -> bool:
+        ctl = self._bin("unbound-control")
+        if not ctl or not self.cache_file.exists() or time.time() - self.cache_file.stat().st_mtime > 7 * 86400:
+            return False
+        for _ in range(30):  # espera a que Unbound acepte órdenes
+            code, _ = await self.control("status")
+            if code == 0:
+                break
+            await asyncio.sleep(0.5)
+        proc = await asyncio.create_subprocess_exec(ctl, "-c", str(self.conf), "load_cache", stdin=asyncio.subprocess.PIPE,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        try:
+            out, _ = await asyncio.wait_for(proc.communicate(self.cache_file.read_bytes()), 60)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return False
+        ok = proc.returncode == 0
+        log.info("caché de Unbound %s", "restaurada desde disco" if ok else f"no se pudo restaurar: {out.decode(errors='ignore')[:120]}")
+        return ok
+
+    async def persist_loop(self) -> None:
+        """Guarda la caché cada 15 min (por si se corta la luz)."""
+        while True:
+            await asyncio.sleep(900)
+            try:
+                await self.dump_cache()
+            except Exception as exc:  # pragma: no cover
+                log.debug("volcado de caché: %s", exc)
+
     async def stop(self) -> None:
+        try:
+            await self.dump_cache()
+        except Exception:  # pragma: no cover
+            pass
         self._stop = True
         if self.proc and self.proc.returncode is None:
             self.proc.terminate()
@@ -311,7 +366,7 @@ def recommend_config(current: dict, cpus: int, mem_bytes: int) -> dict:
         "cache_min_ttl": 60,               # menos recursión para dominios que ponen TTL muy bajo
         "cache_max_ttl": 86400,
         "prefetch": True, "prefetch_key": True,
-        "serve_expired": True, "serve_expired_ttl": 86400, "serve_expired_client_timeout": 1800,
+        "serve_expired": True, "serve_expired_ttl": 86400, "serve_expired_client_timeout": 0,
         "qname_minimisation": True, "aggressive_nsec": True,
         "hide_identity": True, "harden_glue": True, "harden_dnssec_stripped": True,
         "dnssec": True, "rebind_protection": True,
