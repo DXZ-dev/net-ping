@@ -22,6 +22,7 @@ from .pinger import ping
 log = logging.getLogger("bipon.devices")
 
 ONLINE_WINDOW = 600  # s sin verse -> desconectado
+WAKE_EVERY = 180  # s mínimos entre sondeos de despertar al mismo equipo
 MAX_HOSTS_PER_SUBNET = 1024
 
 
@@ -67,6 +68,7 @@ class DeviceManager:
         self._ip6_refreshed = 0.0
         self.family = None  # FamilyManager (tiempo de pantalla), lo asigna el contexto
         self.listeners: set[asyncio.Queue] = set()
+        self._last_wake: dict[str, float] = {}
         self._last_seen_arp: dict[str, float] = {}
         self.last_sweep = 0.0
         self.on_new_device = None
@@ -393,7 +395,12 @@ class DeviceManager:
         now0 = time.time()
         quiet = [{"mac": m, "ip": d["ip"]} for m, d in self.devices.items()
                  if d.get("ip") and not m.startswith("ip:") and d.get("ip") not in (self.self_ip, self.gateway)
-                 and 40 < now0 - max(self._last_seen_arp.get(m, d.get("last_seen") or 0), self.activity.get(d["ip"], 0)) < 1800]
+                 and 40 < now0 - max(self._last_seen_arp.get(m, d.get("last_seen") or 0), self.activity.get(d["ip"], 0)) < 1800
+                 and now0 - self._last_wake.get(m, 0) > WAKE_EVERY]
+        # cada equipo se despierta como mucho una vez cada WAKE_EVERY s: sondear móviles en reposo cada 30 s
+        # ocupa tiempo de aire del Wi-Fi y añade jitter a los demás
+        for t in quiet:
+            self._last_wake[t["mac"]] = now0
         woke = await self._wake_probe(quiet, ifaces) if quiet else set()
         if not quiet:
             await asyncio.sleep(2.5)

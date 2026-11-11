@@ -88,3 +88,49 @@ def test_backup_dns_points_to_isp_router(gateway_mode):
     opts = dict(srv._options(1800))
     assert socket.inet_ntoa(opts[3]) == cfg["router"]
     assert socket.inet_ntoa(opts[6][4:8]) == "192.168.18.1"
+
+
+def _nft_check(rules):
+    nft = shutil.which("nft")
+    if not nft:
+        return None
+    res = subprocess.run([nft, "-c", "-f", "-"], input=rules, capture_output=True, text=True)
+    if "Operation not permitted" in res.stderr:
+        return None
+    return res
+
+
+def test_accounting_uses_hash_map_not_rule_per_device(monkeypatch):
+    r, ctx = make(monkeypatch)
+    ctx.devices.devices["aa:00:00:00:00:02"] = {"ip": "192.168.18.41"}
+    rules = r.ruleset({**r.cfg(), "enabled": True, "wan": "eth0", "lan": "eth0", "accounting": True})
+    # una búsqueda por paquete, sin importar cuántos dispositivos haya
+    assert rules.count("counter name ip saddr map @acct_tx") == 1
+    assert '192.168.18.41 : "tx_aa0000000002"' in rules and "flowtable" not in rules
+    res = _nft_check(rules)
+    if res is not None:
+        assert res.returncode == 0, res.stderr
+
+
+def test_fastpath_without_accounting_and_fallback(monkeypatch):
+    r, _ = make(monkeypatch)
+    c = {**r.cfg(), "enabled": True, "wan": "eth0", "lan": "eth0", "accounting": False}
+    assert "flow add @ft" in r.ruleset(c)
+    assert "flowtable" not in r.ruleset(c, fastpath=False)
+    assert "flowtable" not in r.ruleset({**c, "fastpath": False})
+
+
+def test_unchanged_rules_are_not_reloaded(monkeypatch):
+    r, ctx = make(monkeypatch)
+    loads = []
+
+    async def fake_run(*args, input=None, timeout=20):
+        if args[:2] == ("nft", "-f"):
+            loads.append(input)
+        return 0, "table inet bipon {}" if args[:2] == ("nft", "list") else ""
+    monkeypatch.setattr(router_mod, "_run", fake_run)
+    monkeypatch.setattr(RouterManager, "available", property(lambda self: True))
+    c = {**r.cfg(), "enabled": True, "wan": "eth0", "lan": "eth0"}
+    asyncio.run(r.apply(c, confirm_required=False))
+    asyncio.run(r.apply(c, confirm_required=False))
+    assert len(loads) == 1

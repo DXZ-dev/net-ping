@@ -84,7 +84,7 @@ class RouterManager:
         return c
 
     # ---------------------------------------------------------------- reglas
-    def ruleset(self, c: dict) -> str:
+    def ruleset(self, c: dict, fastpath: bool = True) -> str:
         devices = self.ctx.devices
         blocked_macs = []
         if c.get("block_devices"):
@@ -102,7 +102,26 @@ class RouterManager:
         lan_ifs = [c["lan"]] if c.get("lan") else []
         for z in c.get("zones", []):
             lan_ifs.append(self._zone_iface(z, c))
+        acct = {}
+        if c.get("accounting"):
+            for mac, d in devices.devices.items():
+                ip = d.get("ip")
+                if not ip or ip in (self_ip, devices.gateway) or ip in acct or mac.startswith("ip:"):
+                    continue
+                acct[ip] = mac
+        fast = bool(fastpath and c.get("fastpath", True) and not acct and lan_ifs)
         lines = ["table inet bipon {"]
+        for ip, mac in acct.items():
+            key = mac.replace(":", "")
+            lines.append(f"  counter tx_{key} {{ comment \"{mac}\" }}")
+            lines.append(f"  counter rx_{key} {{ comment \"{mac}\" }}")
+        if acct:
+            for kind, prefix in (("tx", "tx_"), ("rx", "rx_")):
+                elems = ", ".join(f'{ip} : "{prefix}{mac.replace(":", "")}"' for ip, mac in acct.items())
+                lines.append(f"  map acct_{kind} {{ type ipv4_addr : counter; elements = {{ {elems} }} }}")
+        if fast:
+            devs = ", ".join(f'"{i}"' for i in dict.fromkeys(lan_ifs + ([c["wan"]] if c.get("wan") else [])))
+            lines.append(f"  flowtable ft {{ hook ingress priority 0; devices = {{ {devs} }}; }}")
         lines.append(f"  set blocked_macs {{ type ether_addr; {('elements = { ' + ', '.join(blocked_macs) + ' };') if blocked_macs else ''} }}")
         lines.append("  chain forward {")
         lines.append("    type filter hook forward priority -10; policy accept;")
@@ -113,13 +132,13 @@ class RouterManager:
                 lines.append(f"    ip saddr {net} ip daddr {PRIVATE} ip daddr != {net} ct state new counter drop comment \"zona {z['name']} aislada\"")
             if not z.get("internet", True):
                 lines.append(f"    ip saddr {net} ip daddr != {PRIVATE} counter drop comment \"zona {z['name']} sin Internet\"")
-        if c.get("accounting"):
-            for mac, d in devices.devices.items():
-                ip = d.get("ip")
-                if not ip or ip in (self_ip, devices.gateway):
-                    continue
-                lines.append(f"    ip saddr {ip} counter comment \"tx {mac}\"")
-                lines.append(f"    ip daddr {ip} counter comment \"rx {mac}\"")
+        if acct:
+            # una sola búsqueda en tabla hash por paquete (antes: 2 reglas por dispositivo → más latencia con muchos equipos)
+            lines.append("    counter name ip saddr map @acct_tx")
+            lines.append("    counter name ip daddr map @acct_rx")
+        if fast:
+            # ruta rápida: tras el primer paquete, la conexión se reenvía sin recorrer el firewall (menos latencia y CPU)
+            lines.append("    meta l4proto { tcp, udp } ct state established flow add @ft")
         lines.append("  }")
         lines.append("  chain prerouting {")
         lines.append("    type nat hook prerouting priority dstnat; policy accept;")
@@ -209,7 +228,16 @@ class RouterManager:
             except OSError:
                 pass
         notes = await self._zones_up(c)
-        ok, out = await self._load(self.ruleset(c))
+        text = self.ruleset(c)
+        if text == getattr(self, "_loaded_text", None) and previous:
+            ok, out = True, ""  # nada cambió: no se recarga (recargar cada vez reinicia contadores y mete microcortes)
+        else:
+            ok, out = await self._load(text)
+            if not ok and "flowtable" in text:  # núcleo sin nf_flow_table (p. ej. algunos LXC): sin ruta rápida
+                text = self.ruleset(c, fastpath=False)
+                ok, out = await self._load(text)
+            if ok:
+                self._loaded_text = text
         if not ok:
             self.last_error = out
             return {"ok": False, "message": out}
@@ -341,20 +369,17 @@ class RouterManager:
 
     # ---------------------------------------------------------------- contabilidad
     async def read_counters(self) -> dict[str, tuple[int, int]]:
-        code, out = await _run("nft", "-j", "list", "chain", "inet", "bipon", "forward")
+        code, out = await _run("nft", "-j", "list", "counters", "table", "inet", "bipon")
         if code != 0:
             return {}
         res: dict[str, list[int]] = {}
         for item in json.loads(out).get("nftables", []):
-            rule = item.get("rule")
-            if not rule:
+            ctr = item.get("counter")
+            if not ctr or not str(ctr.get("name", "")).startswith(("tx_", "rx_")):
                 continue
-            comment = rule.get("comment", "")
-            if not comment.startswith(("tx ", "rx ")):
-                continue
-            nbytes = next((e["counter"]["bytes"] for e in rule.get("expr", []) if isinstance(e, dict) and "counter" in e), 0)
-            kind, mac = comment.split(" ", 1)
-            res.setdefault(mac, [0, 0])[0 if kind == "rx" else 1] += nbytes
+            mac = ctr.get("comment") or ""
+            if mac:
+                res.setdefault(mac, [0, 0])[0 if ctr["name"].startswith("rx_") else 1] += int(ctr.get("bytes", 0))
         return {m: (v[0], v[1]) for m, v in res.items()}
 
     async def loop(self) -> None:
