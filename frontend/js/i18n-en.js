@@ -1778,7 +1778,17 @@ export const EN = {
   "Viernes": "Friday",
   "Sábado": "Saturday",
   "Equipo con señal Wi-Fi débil": "Device with weak Wi-Fi signal",
-  "Cambio de ruta a tu juego (más ping)": "Route change to your game (more ping)"
+  "Cambio de ruta a tu juego (más ping)": "Route change to your game (more ping)",
+  "En unos pasos dejaremos tu red protegida, rápida y bajo control.": "In a few steps we'll leave your network protected, fast and under control.",
+  "Menos lag": "Less lag",
+  "DNS más rápido desde tu ubicación, caché instantánea y modo gaming.": "Fastest DNS from your location, instant cache and gaming mode.",
+  "Sin anuncios ni amenazas": "No ads or threats",
+  "Bloqueo de anuncios, rastreadores, malware y phishing en toda la red.": "Blocks ads, trackers, malware and phishing across the whole network.",
+  "Control de cada equipo": "Control every device",
+  "Perfiles, horarios, pausa de Internet y tiempo de pantalla.": "Profiles, schedules, Internet pause and screen time.",
+  "Todo a la vista": "Everything in view",
+  "Dispositivos en tiempo real, calidad de conexión y avisos.": "Real-time devices, connection quality and alerts.",
+  "Privacidad": "Privacy"
 };
 
 export const EN_PATTERNS = [

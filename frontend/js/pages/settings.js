@@ -120,9 +120,8 @@ export async function render(el, app) {
     async system() {
       const [s, sys, prefs] = await Promise.all([api.get("/settings"), api.get("/system"), api.get("/system/prefs")]);
       pane.innerHTML = `<div class="grid g2">
-        <div class="card"><header><h2>${ico("server")}${t("Edición y privacidad")}</h2></header>
-          <label class="field">${t("Edición")}<select id="ed"><option value="home" ${prefs.edition === "home" ? "selected" : ""}>${t("Hogar")}</option><option value="business" ${prefs.edition === "business" ? "selected" : ""}>${t("Empresa")}</option></select></label>
-          <div class="opt mt"><div class="t"><b>${t("Anonimizar clientes en el registro")}</b><span>${t("Guarda un identificador en lugar de la IP de cada equipo (protección de datos en empresas). Desactiva las estadísticas por dispositivo.")}</span></div>${toggle("anon", prefs.privacy?.anonymize_clients, 'id="anon"')}</div>
+        <div class="card"><header><h2>${ico("lock")}${t("Privacidad")}</h2></header>
+          <div class="opt"><div class="t"><b>${t("Anonimizar clientes en el registro")}</b><span>${t("Guarda un identificador en lugar de la IP de cada equipo (protección de datos en empresas). Desactiva las estadísticas por dispositivo.")}</span></div>${toggle("anon", prefs.privacy?.anonymize_clients, 'id="anon"')}</div>
           <button class="btn mt" id="ed-save">${ico("check")}${t("Guardar")}</button></div>
         <form class="card" id="gen"><header><h2>${ico("settings")}${t("General")}</h2></header><div class="form-grid">
           <label class="field">${t("Análisis completo cada (s)")}<input type="number" name="scan_interval" min="120" value="${s.devices.scan_interval}"></label>
@@ -154,7 +153,7 @@ export async function render(el, app) {
       pane.querySelector("#del-stats").onclick = reset(["stats"], t("Borrar estadísticas"), t("Se borrarán consultas, velocidad, tráfico y monitor. ¿Continuar?"));
       pane.querySelector("#del-logs").onclick = reset(["logs"], t("Borrar registros"), t("Se borrarán los eventos y el registro de la aplicación. ¿Continuar?"));
       pane.querySelector("#del-devs").onclick = reset(["devices"], t("Borrar dispositivos conocidos"), t("Se borrará la lista de dispositivos y las aceptaciones del portal. Reaparecerán al reconectarse. ¿Continuar?"));
-      pane.querySelector("#ed-save").onclick = (e) => busy(e.currentTarget, () => api.put("/system/prefs", { edition: pane.querySelector("#ed").value, privacy: { anonymize_clients: pane.querySelector("#anon").checked } })).then(() => toast(t("Guardado"))).catch(() => {});
+      pane.querySelector("#ed-save").onclick = (e) => busy(e.currentTarget, () => api.put("/system/prefs", { privacy: { anonymize_clients: pane.querySelector("#anon").checked } })).then(() => toast(t("Guardado"))).catch(() => {});
       const f = pane.querySelector("#gen");
       f.onsubmit = (e) => { e.preventDefault(); busy(f.querySelector("button.primary"), () => api.put("/settings", {
         devices: { scan_interval: Number(f.scan_interval.value), resolve_names: f.resolve_names.checked, subnets: f.subnets.value.split(/[\s,]+/).filter(Boolean) },

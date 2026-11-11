@@ -1181,7 +1181,7 @@ async def prefs_get(request: Request):
     s = c.settings
     user = request.state.user
     ui = (s.get("ui_prefs") or {}).get(str(user.get("id")), {})
-    return {"edition": s.get("edition") or "home", "privacy": s.get("privacy") or {"anonymize_clients": False},
+    return {"privacy": s.get("privacy") or {"anonymize_clients": False},
             "region": s.get("region") or {}, "ui": ui, "updates": s.get("updates") or {"auto": False, "channel": "main"}}
 
 
@@ -1195,8 +1195,6 @@ async def prefs_put(request: Request, body: dict = Body(...)):
         allp[str(user.get("id"))] = {**allp.get(str(user.get("id")), {}), **body["ui"]}
         s.set("ui_prefs", allp, notify=False)
     if user["role"] == "admin":
-        if body.get("edition") in ("home", "business"):
-            s.set("edition", body["edition"], notify=False)
         if "privacy" in body:
             s.set("privacy", {"anonymize_clients": bool(body["privacy"].get("anonymize_clients"))})
         if "region" in body:

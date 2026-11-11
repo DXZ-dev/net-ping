@@ -38,7 +38,7 @@ const NAV = [
   { path: "settings", label: "Ajustes", icon: "settings", roles: "apv" },
 ];
 
-export const session = { user: null, edition: "home", version: "" };
+export const session = { user: null, version: "" };
 let cleanup = null;
 let statusTimer = null;
 let searchReady = false;
@@ -52,7 +52,6 @@ async function boot() {
   try { st = await api.get("/auth/status"); }
   catch { $("#root").innerHTML = `<div class="login"><div class="card"><p>${t("No se puede contactar con el servidor.")}</p></div></div>`; return; }
   session.version = st.version;
-  session.edition = st.edition || "home";
   if (st.setup_required) return wizard({ fresh: true, version: st.version });
   if (!st.authenticated) return renderLogin(st.version);
   session.user = st.user;
@@ -113,7 +112,7 @@ async function wizard({ fresh: isNew, version }) {
   const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const guessCountry = info.detected_country && info.countries.some((c) => c.code === info.detected_country) ? info.detected_country
     : (info.countries.find((c) => c.timezones.includes(browserTz))?.code || "OTHER");
-  const st = { edition: "home", country: guessCountry, timezone: browserTz, connection: "router", mode: "recommended", family: true,
+  const st = { country: guessCountry, timezone: browserTz, connection: "router", mode: "recommended", family: true,
     lists: [], name: "", email: "", username: "admin" };
   const steps = isNew ? ["welcome", "account", "region", "network", "lists", "mode"] : ["welcome", "region", "network", "lists", "mode"];
   let i = 0;
@@ -147,12 +146,12 @@ async function wizard({ fresh: isNew, version }) {
   const VIEWS = {
     welcome(b) {
       b.innerHTML = `<h2>${isNew ? t("Bienvenido a Bipon Net 👋") : t("Completemos tu configuración")}</h2>
-        <p class="muted">${t("En unos pasos dejaremos tu red protegida, rápida y bajo control. ¿Para qué la vas a usar?")}</p>
+        <p class="muted">${t("En unos pasos dejaremos tu red protegida, rápida y bajo control.")}</p>
         <div class="grid g2 mt">
-          ${choice("edition", "home", "home", t("Hogar"), t("Familia, gaming y streaming: control parental, tiempo de pantalla, bloqueo de anuncios y modo gaming."), st.edition)}
-          ${choice("edition", "business", "server", t("Empresa"), t("Oficinas y negocios: departamentos, horario laboral, red de invitados, auditoría de cambios, exportación CSV y retención ampliada."), st.edition)}
+          ${[["zap", "Menos lag", "DNS más rápido desde tu ubicación, caché instantánea y modo gaming."], ["shield", "Sin anuncios ni amenazas", "Bloqueo de anuncios, rastreadores, malware y phishing en toda la red."],
+            ["users", "Control de cada equipo", "Perfiles, horarios, pausa de Internet y tiempo de pantalla."], ["activity", "Todo a la vista", "Dispositivos en tiempo real, calidad de conexión y avisos."]]
+            .map(([i, ti, d]) => `<div class="choice active" style="cursor:default"><div class="ci">${ico(i)}</div><div><b>${t(ti)}</b><p>${t(d)}</p></div></div>`).join("")}
         </div>`;
-      bindChoices(b);
     },
     account(b) {
       b.innerHTML = `<h2>${t("Crea tu cuenta de administrador")}</h2><p class="muted small">${t("Protege el panel de tu red. Podrás añadir más usuarios (por ejemplo, para los padres) más adelante.")}</p>
@@ -199,7 +198,7 @@ async function wizard({ fresh: isNew, version }) {
         <div class="row mt mb"><button class="btn sm" id="rec-on">${ico("check")}${t("Marcar las recomendadas")}</button><button class="btn sm ghost" id="all-off">${t("Desmarcar todas")}</button></div>
         <div class="col">${all.map((l) => `<label class="opt" style="padding:8px 0"><div class="t"><b>${esc(l.name)}</b><span>${cat[l.category] || ""}${l.default ? " · " + t("recomendada") : ""}</span></div>
           <label class="switch"><input type="checkbox" data-url="${esc(l.url)}" ${st.lists.includes(l.url) ? "checked" : ""}><span></span></label></label>`).join("")}</div>
-        ${st.edition === "home" ? `<div class="opt mt"><div class="t"><b>${t("Crear perfil «Niños»")}</b><span>${t("Búsqueda segura, sin contenido adulto y horario de dormir; luego asígnalo a sus dispositivos.")}</span></div><label class="switch"><input type="checkbox" id="fam" ${st.family ? "checked" : ""}><span></span></label></div>` : ""}`;
+        <div class="opt mt"><div class="t"><b>${t("Crear perfil «Niños»")}</b><span>${t("Búsqueda segura, sin contenido adulto y horario de dormir; luego asígnalo a sus dispositivos.")}</span></div><label class="switch"><input type="checkbox" id="fam" ${st.family ? "checked" : ""}><span></span></label></div>`;
       const sync = () => { st.lists = $$("[data-url]", b).filter((x) => x.checked).map((x) => x.dataset.url); };
       $$("[data-url]", b).forEach((x) => x.onchange = sync);
       b.querySelector("#rec-on").onclick = () => { $$("[data-url]", b).forEach((x) => { x.checked = !!all.find((l) => l.url === x.dataset.url)?.default; }); sync(); };
@@ -228,7 +227,6 @@ async function wizard({ fresh: isNew, version }) {
     async mode() {
       const r = await api.post("/setup/complete", { ...st });
       try { await api.put("/system/prefs", { ui: { ...loadPrefs(), lang: getLang() } }); } catch {}
-      session.edition = st.edition;
       modal({ title: t("¡Listo!"), body: `<div class="col">${r.notes.map((n) => `<div class="alert ok">${ico("check")}<div class="small">${esc(n)}</div></div>`).join("")}</div>`,
         actions: [{ label: t("Entrar al panel"), kind: "primary", onClick: () => { boot(); } }] });
       startTranslator();
@@ -250,7 +248,7 @@ function renderShell(version) {
   $("#root").innerHTML = `
   <div class="app">
     <aside class="sidebar">
-      <div class="brand-row"><a class="brand" href="#/dashboard" title="${t("Ir al panel")}">${LOGO}<div><b>${APP_NAME}</b><small>v${esc(version)} · ${session.edition === "business" ? t("Empresa") : t("Hogar")}</small></div></a>
+      <div class="brand-row"><a class="brand" href="#/dashboard" title="${t("Ir al panel")}">${LOGO}<div><b>${APP_NAME}</b><small>v${esc(version)}</small></div></a>
         <button class="icon-btn nav-close" id="nav-close" aria-label="${t("Cerrar menú")}" title="${t("Cerrar menú")}">${ico("x")}</button></div>
       <nav class="nav">${nav}</nav>
       <div class="sidebar-foot">

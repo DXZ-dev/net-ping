@@ -57,7 +57,7 @@ async def auth_status(request: Request):
     u = auth.current_user(request) if auth.password_set() else None
     c = ctx(request)
     return {"setup_required": not auth.password_set(), "authenticated": u is not None, "version": __version__,
-            "setup_completed": bool((c.settings.get("setup") or {}).get("completed")), "edition": c.settings.get("edition") or "home",
+            "setup_completed": bool((c.settings.get("setup") or {}).get("completed")),
             "user": auth.public_user(u) if u and not u.get("token") else (u if u else None)}
 
 

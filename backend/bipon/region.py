@@ -117,8 +117,6 @@ async def complete_setup(ctx, body: dict) -> dict:
                      "owner": {"name": (body.get("name") or "")[:60], "email": (body.get("email") or "")[:120]}}, notify=False)
     apply_timezone(tz)
 
-    edition = body.get("edition", "home") if body.get("edition") in ("home", "business") else "home"
-    s.set("edition", edition, notify=False)
 
     # listas: SÓLO las que el usuario marcó en el registro
     chosen = set(body.get("lists") or [])
@@ -144,17 +142,8 @@ async def complete_setup(ctx, body: dict) -> dict:
         notes.append("Configuración recomendada aplicada: caché optimista, modo gaming, seguridad, test de velocidad nocturno e informes semanales.")
     from .api import create_profile
     names = [p["id"] for p in s.get("profiles")]
-    if body.get("family") and edition == "home" and not any(n.startswith("ninos") for n in names):
+    if body.get("family") and not any(n.startswith("ninos") for n in names):
         create_profile(ctx, {"name": "Niños", "template": "kids"})
-    if edition == "business":
-        if not any(n.startswith("empleados") for n in names):
-            create_profile(ctx, {"name": "Empleados", "template": "work"})
-        if not any(n.startswith("invitados") for n in names):
-            create_profile(ctx, {"name": "Invitados", "template": "guest"})
-        s.set("retention_days", max(90, int(s.get("retention_days", 30))), notify=False)
-        s.update("security", {"anomaly_detection": True, "blocked_tlds": ["zip", "mov"]})
-        notes.append("Edición empresarial: perfiles Empleados (redes sociales y ocio bloqueados en horario laboral) e Invitados, "
-                     "auditoría de cambios, exportación CSV y retención de 90 días.")
 
     if connection == "auto":
         s.set("autodns", {**(s.get("autodns") or {}), "enabled": True}, notify=False)
