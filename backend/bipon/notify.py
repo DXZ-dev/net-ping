@@ -30,6 +30,8 @@ EVENTS: dict[str, dict] = {
     "internet_down": {"label": "Caída de Internet", "cooldown": 300, "default": True, "priority": "high", "icon": "🔴"},
     "internet_up": {"label": "Internet restablecido", "cooldown": 0, "default": True, "priority": "default", "icon": "🟢"},
     "lag_spike": {"label": "Subida de ping (lag) y su posible causa", "cooldown": 600, "default": True, "priority": "high", "icon": "🎮"},
+    "wifi_weak": {"label": "Equipo con señal Wi-Fi débil", "cooldown": 21600, "default": True, "priority": "default", "icon": "📶"},
+    "route_change": {"label": "Cambio de ruta a tu juego (más ping)", "cooldown": 10800, "default": True, "priority": "default", "icon": "🛣️"},
     "speed_low": {"label": "Velocidad por debajo del umbral", "cooldown": 3600, "default": True, "priority": "default", "icon": "🐢"},
     "threat_blocked": {"label": "Amenaza bloqueada (malware/phishing)", "cooldown": 3600, "default": True, "priority": "high", "icon": "🛡️"},
     "anomaly": {"label": "Comportamiento anómalo de un dispositivo", "cooldown": 3600, "default": True, "priority": "high", "icon": "⚠️"},

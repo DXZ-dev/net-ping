@@ -503,3 +503,9 @@ a.brand:hover { opacity: .85; }
 .netmap svg.grabbing .node { pointer-events: none; }
 .map-tools { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 2; }
 .map-tools .icon-btn { width: 34px; height: 34px; font-size: 18px; font-weight: 600; background: var(--card); border: 1px solid var(--border); backdrop-filter: var(--glass-blur); }
+
+/* mapa de calor del lag */
+table.heatmap { border-collapse: separate; border-spacing: 2px; width: 100%; min-width: 640px; }
+table.heatmap th { font-size: 10px; color: var(--muted); font-weight: 500; padding: 0 2px; text-align: center; }
+table.heatmap tbody th { text-align: right; padding-right: 6px; white-space: nowrap; }
+table.heatmap td { height: 22px; border-radius: 4px; background: var(--card-2); min-width: 18px; }

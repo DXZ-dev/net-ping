@@ -26,6 +26,7 @@ const NAV = [
   { path: "router", label: "Router y firewall", icon: "router", roles: "av" },
   { path: "connectivity", label: "NAT y CGNAT", icon: "network", roles: "av" },
   { path: "vpn", label: "VPN", icon: "key", roles: "av" },
+  { path: "quality", label: "Calidad de conexión", icon: "gauge", roles: "av" },
   { path: "monitor", label: "Monitor", icon: "activity", roles: "av" },
   { path: "tools", label: "Herramientas", icon: "tool", roles: "av" },
   { path: "infra", label: "Infraestructura", icon: "server", roles: "av" },

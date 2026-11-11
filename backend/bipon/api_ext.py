@@ -960,6 +960,51 @@ async def ha_put(request: Request, body: dict = Body(...)):
     return {"ok": True, "connected": bool(url and token)}
 
 
+# =====================================================================
+# Calidad de conexión: Wi-Fi débil, mapa de lag, ruta del juego, informe para el proveedor
+# =====================================================================
+@api.get("/quality/lan")
+async def quality_lan(request: Request):
+    return ctx(request).quality.lan_status()
+
+
+@api.post("/quality/lan")
+async def quality_lan_run(request: Request):
+    return await ctx(request).quality.lan_check()
+
+
+@api.get("/quality/heatmap")
+async def quality_heatmap(request: Request, days: int = 14):
+    return ctx(request).quality.heatmap(max(1, min(days, 90)))
+
+
+@api.get("/quality/route")
+async def quality_route(request: Request, days: int = 7):
+    return ctx(request).quality.route_history(max(1, min(days, 60)))
+
+
+@api.post("/quality/route")
+async def quality_route_run(request: Request, body: dict = Body(default={})):
+    c = ctx(request)
+    if "game_region" in body:
+        cfg = c.quality.cfg()
+        cfg["game_region"] = str(body["game_region"] or "")[:30]
+        c.settings.set("quality", cfg, notify=False)
+    return {"result": await c.quality.route_check(), **c.quality.route_history()}
+
+
+@api.get("/quality/report")
+async def quality_report(request: Request, days: int = 30, format: str = "json", contracted: float = 0):
+    q = ctx(request).quality
+    days = max(1, min(days, 365))
+    if format == "csv":
+        return Response(q.report_csv(days), media_type="text/csv; charset=utf-8",
+                        headers={"content-disposition": f'attachment; filename="bipon-informe-conexion-{days}d.csv"'})
+    if format == "html":
+        return Response(q.report_html(days, contracted or None), media_type="text/html; charset=utf-8")
+    return q.report(days)
+
+
 @api.get("/speedctl")
 async def speedctl_get(request: Request):
     """Método con el que se limitaría la velocidad de cada dispositivo."""
