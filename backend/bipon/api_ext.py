@@ -3,6 +3,7 @@ seguridad, modo automático, tareas programadas, informes, sincronización,
 TLS, integraciones, modo router y configuración inicial."""
 from __future__ import annotations
 
+import asyncio
 import re
 import json
 import time
@@ -1290,6 +1291,69 @@ async def system_reset(request: Request, body: dict = Body(...)):
         done.append("anomalías")
     c.db.event("warning", "sistema", f"Datos borrados por {request.state.user.get('username')}: {', '.join(done)}")
     return {"ok": True, "deleted": done}
+
+
+def _confirm_admin_password(request: Request, body: dict, action: str) -> dict:
+    """Acciones drásticas: sólo un administrador con sesión iniciada y que vuelva a escribir su contraseña."""
+    from . import auth
+    user = request.state.user
+    ip = request.client.host if request.client else ""
+    if user.get("role") != "admin" or request.headers.get("authorization", "").lower().startswith("bearer"):
+        raise HTTPException(403, "Sólo un administrador con sesión iniciada puede hacer esto")
+    auth.throttle(ip)
+    full = auth.get_user(uid=user.get("id")) if user.get("id") is not None else auth.get_user(username=user.get("username"))
+    if not full or not auth.verify_password(str(body.get("password", "")), full["password_hash"]):
+        auth.record_failure(ip)
+        ctx(request).db.event("warning", "seguridad", f"Contraseña incorrecta al intentar {action} ({user.get('username')}, {ip})")
+        raise HTTPException(401, "Contraseña incorrecta")
+    return user
+
+
+@api.post("/system/repair")
+async def system_repair(request: Request):
+    """Botón FIX: diagnostica y repara (DNS, Unbound, listas, caché, firewall, colas, disco, procesos)."""
+    if request.state.user.get("role") != "admin":
+        raise HTTPException(403)
+    from . import repair
+    try:
+        return await repair.run(ctx(request))
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@api.post("/system/restart")
+async def system_restart(request: Request):
+    if request.state.user.get("role") != "admin":
+        raise HTTPException(403)
+    from . import factory
+    c = ctx(request)
+    c.db.event("info", "sistema", f"Reinicio solicitado por {request.state.user.get('username')}")
+    try:
+        await asyncio.wait_for(c.stop(), 15)
+    except Exception:
+        pass
+    factory.restart_process()
+    return {"ok": True, "message": "Bipon Net se está reiniciando"}
+
+
+@api.post("/system/rollback")
+async def system_rollback(request: Request, body: dict = Body(default={})):
+    """Vuelve a la versión instalada anteriormente (la configuración se conserva y se hace copia antes)."""
+    _confirm_admin_password(request, body, "volver a la versión anterior")
+    try:
+        return await ctx(request).updater.rollback(body.get("commit") or None)
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+@api.post("/system/factory-reset")
+async def system_factory_reset(request: Request, body: dict = Body(...)):
+    """Restablece todo de fábrica. Exige la palabra de confirmación y la contraseña del administrador."""
+    if str(body.get("confirm", "")).strip().upper() not in ("RESTABLECER", "RESET"):
+        raise HTTPException(400, "Escribe RESTABLECER para confirmar")
+    user = _confirm_admin_password(request, body, "restablecer de fábrica")
+    from . import factory
+    return await factory.reset(ctx(request), user.get("username") or "admin")
 
 
 @api.get("/system/prefs")

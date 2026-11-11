@@ -23,7 +23,18 @@ if git remote get-url origin >/dev/null 2>&1; then
 else
   git remote add origin "$REPO_URL"
 fi
-"${GIT[@]}" fetch --depth 50 origin "$BRANCH"
-git reset --hard "origin/$BRANCH"
+if [[ -n "${BIPON_TARGET:-}" ]]; then
+  # volver a una versión concreta (botón «Volver a la versión anterior»)
+  [[ "$BIPON_TARGET" =~ ^[0-9a-f]{7,40}$ ]] || { echo "Versión no válida: $BIPON_TARGET"; exit 1; }
+  echo "Volviendo a la versión $BIPON_TARGET"
+  if ! git cat-file -e "${BIPON_TARGET}^{commit}" 2>/dev/null; then
+    "${GIT[@]}" fetch --depth 50 origin "$BRANCH" || true
+    git cat-file -e "${BIPON_TARGET}^{commit}" 2>/dev/null || "${GIT[@]}" fetch --depth 1 origin "$BIPON_TARGET"
+  fi
+  git reset --hard "$BIPON_TARGET"
+else
+  "${GIT[@]}" fetch --depth 50 origin "$BRANCH"
+  git reset --hard "origin/$BRANCH"
+fi
 bash "$SRC/deploy/linux/install.sh" --update
 echo "[$(date -Is)] Actualización completada: $(git rev-parse --short HEAD)"

@@ -50,6 +50,7 @@ class Upstream:
     failures: int = 0
     last_fail: float = 0.0
     total: int = 0
+    streak: int = 0  # fallos seguidos
     _tls_ctx: ssl.SSLContext | None = field(default=None, repr=False)
 
     @classmethod
@@ -82,14 +83,21 @@ class Upstream:
     def record(self, rtt_ms: float | None) -> None:
         self.total += 1
         if rtt_ms is None:
+            self.streak += 1
             self.failures += 1
             self.last_fail = time.monotonic()
             # penalización para que la estrategia "fastest" lo evite durante un tiempo
             self.ewma = max(self.ewma, 1000.0) if self.samples else 1000.0
             return
+        self.streak = 0
         self.samples += 1
         alpha = 0.3 if self.samples > 5 else 0.6
         self.ewma = rtt_ms if self.samples == 1 else (alpha * rtt_ms + (1 - alpha) * self.ewma)
+
+    @property
+    def down(self) -> bool:
+        """Tras 3 fallos seguidos se da por caído 15 s: no se le hace esperar a cada consulta."""
+        return self.streak >= 3 and time.monotonic() - self.last_fail < 15
 
     def score(self) -> float:
         if self.samples == 0:
@@ -185,6 +193,10 @@ class UpstreamPool:
         self.upstreams: list[Upstream] = []
         self.strategy = "fastest"
         self.timeout = 2.0
+        # respaldo de emergencia: sólo si TODOS los configurados fallan (p. ej. Unbound colgado), para que la casa
+        # siga teniendo DNS en vez de esperar y fallar
+        self.emergency = [Upstream.parse("1.1.1.1"), Upstream.parse("9.9.9.9")]
+        self.emergency_used = 0
         self._http: httpx.AsyncClient | None = None
 
     def configure(self, specs: list[str], strategy: str, timeout_ms: int) -> None:
@@ -228,6 +240,12 @@ class UpstreamPool:
         up.record(rtt)
         return resp, up, rtt
 
+    async def _probe(self, up: Upstream, wire: bytes) -> None:
+        try:
+            await self._one(up, wire)
+        except Exception:
+            pass
+
     async def resolve(self, wire: bytes) -> tuple[bytes, Upstream, float]:
         if not self.upstreams:
             raise UpstreamError("no hay servidores upstream configurados")
@@ -244,9 +262,24 @@ class UpstreamPool:
                     t.cancel()
             raise UpstreamError("todos los upstream fallaron")
         last: Exception | None = None
-        for up in self.ordered():
+        ups = self.ordered()
+        alive = [u for u in ups if not u.down]
+        if not alive and ups:
+            # todos caídos: se responde ya con el respaldo y se comprueba en segundo plano si el principal volvió
+            self._probe_task = asyncio.ensure_future(self._probe(ups[0], wire))
+        for up in alive:
             try:
                 return await self._one(up, wire)
+            except Exception as exc:
+                last = exc
+        for up in self.emergency:
+            if up.spec in {u.spec for u in ups}:
+                continue
+            try:
+                t0 = time.perf_counter()
+                resp = await up.query(wire, min(self.timeout, 1.0), self.http())
+                self.emergency_used += 1
+                return resp, up, (time.perf_counter() - t0) * 1000
             except Exception as exc:
                 last = exc
         raise UpstreamError(f"todos los upstream fallaron: {last!r}")

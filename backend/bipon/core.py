@@ -250,6 +250,8 @@ class Context:
         from . import unbound_auto
         self._bg(unbound_auto.loop(self), "autoajuste de Unbound")
         self._bg(self.unbound.persist_loop(), "caché persistente de Unbound")
+        from . import repair
+        self._bg(repair.watchdog(self), "vigilante de Unbound")
         self._bg(self.updater.loop(), "actualizaciones")
         self._bg(self.captive.loop(), "portal cautivo")
         self.db.event("info", "sistema", "Bipon Net iniciado")

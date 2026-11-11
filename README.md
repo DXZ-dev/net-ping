@@ -110,7 +110,8 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 - **Copias de seguridad automáticas** con retención y restauración en un clic; **registros** del sistema; **buscador** (Ctrl+K).
 - **Informes** semanales, **alta disponibilidad** (dos Bipon), Home Assistant, Proxmox.
 - **Perfiles de configuración** para guardar y alternar escenarios.
-- **Actualizaciones** desde GitHub con un botón (o automáticas).
+- **Actualizaciones** desde GitHub con un botón (o automáticas) y **volver a la versión anterior** si algo sale mal.
+- **Botón FIX**: diagnostica y repara solo (DNS, Unbound colgado, listas, caché, firewall, colas, disco) + vigilante que reinicia Unbound si se cuelga; **restablecer de fábrica** con copia previa.
 - Interfaz en **español e inglés**, **9 temas** (glass, shadcn Zinc, Aurora, Neón, Nord…), panel editable y **guía interactiva**.
 
 </td></tr>
@@ -209,6 +210,7 @@ Crea un LXC Debian 12 no privilegiado (2 CPU, 1 GB, 8 GB), habilita **TUN** para
 - **Desde la web:** *Ajustes → Actualizaciones → Buscar actualizaciones* (o activa «¿Deseas recibir actualizaciones automáticas?»).
 - **Linux/Proxmox a mano:** `sudo bash /opt/bipon-net/src/deploy/linux/update.sh`
 - **Docker:** `git pull && docker compose up -d --build`
+- **Volver atrás:** *Ajustes → Reparar y restablecer → Volver a la versión anterior* (Docker: `git checkout <versión> && docker compose up -d --build`).
 
 > **¿Venías de NetPing?** El instalador migra solo el servicio, los datos (`/var/lib/netping` → `/var/lib/bipon-net`) y la contraseña. Las variables `NETPING_*` siguen funcionando.
 
@@ -273,6 +275,7 @@ Para que los juegos tengan **NAT abierto**, pon la IP de Bipon en la **DMZ** del
 | Se cuelan anuncios | DNS secundario externo en el router o DNS cifrado del navegador: activa «Evitar DNS cifrado del navegador». |
 | No se ven dispositivos | Docker necesita `network_mode: host`; en Proxmox el LXC debe estar en el mismo puente/VLAN. |
 | «Permisos de red limitados» | Falta `/dev/net/tun`: *VPN → Activar TUN* (vía Proxmox) o las líneas `lxc.*` de arriba. |
+| Algo se rompió | *Ajustes → Reparar y restablecer → **FIX***. Si fue tras una actualización: *Volver a la versión anterior*. Último recurso: *Restablecer de fábrica* (los datos se apartan en `backups/factory-*`). |
 | Algo no funciona y no sabes qué | *Ajustes → Registros*: eventos, registro de la aplicación y de Unbound, con filtros. |
 | Una web o app dejó de funcionar | *Bloqueo* muestra «¿Algo dejó de funcionar?» con los dominios bloqueados que se están reintentando. |
 | Los horarios no cuadran | Ajusta la zona horaria en *Ajustes* o `TZ`. |

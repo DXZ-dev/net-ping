@@ -7,7 +7,7 @@ export const subtitle = "Apariencia, idioma, actualizaciones, perfiles de config
 
 export async function render(el, app) {
   const admin = app.session?.user?.role === "admin";
-  const TABS = [["look", "Apariencia", "sun"], ["lang", "Idioma y región", "globe"], ...(admin ? [["updates", "Actualizaciones", "download"], ["configs", "Perfiles de configuración", "list"],
+  const TABS = [["look", "Apariencia", "sun"], ["lang", "Idioma y región", "globe"], ...(admin ? [["recovery", "Reparar y restablecer", "zap"], ["updates", "Actualizaciones", "download"], ["configs", "Perfiles de configuración", "list"],
     ["system", "Sistema", "settings"], ["logs", "Registros", "list"], ["audit", "Auditoría", "shield"]] : []), ["account", "Mi cuenta", "key"]];
   let tab = sessionStorage.getItem("np-set-tab") || "look";
   if (!TABS.some((x) => x[0] === tab)) tab = "look";
@@ -60,6 +60,66 @@ export async function render(el, app) {
         await api.put("/system/prefs", { ui: { lang: lg }, ...(admin ? { region: { country: pane.querySelector("#ct").value, timezone: pane.querySelector("#tz").value } } : {}) });
         if (lg !== getLang()) { setLang(lg); location.reload(); } else toast(t("Guardado"));
       }).catch(() => {});
+    },
+    // ------------------------------------------------------------ reparar y restablecer
+    async recovery() {
+      const u = await api.get("/updates");
+      const hist = (u.history || []).filter((h) => h.commit !== u.commit);
+      const docker = u.mode === "docker";
+      pane.innerHTML = `<div class="grid g2">
+        <div class="card"><header><h2>${ico("zap")}FIX — ${t("Reparar el sistema")}</h2></header>
+          <p class="muted small">${t("Revisa y arregla solo lo que suele romperse: base de datos, servidor DNS, Unbound, servidores de salida, listas de bloqueo, caché, firewall, colas de velocidad olvidadas, disco y procesos internos. También mide la latencia. No borra tu configuración.")}</p>
+          <button class="btn primary mt" id="fix" style="font-size:1.05rem;padding:.8rem 1.6rem">${ico("zap")}FIX</button>
+          <div id="fix-out" class="mt"></div></div>
+        <div class="card"><header><h2>${ico("refresh")}${t("Volver a la versión anterior")}</h2></header>
+          <p class="muted small">${t("Si una actualización te dio problemas, vuelve a la versión que tenías antes. Tu configuración se conserva y antes se hace una copia de seguridad.")}</p>
+          <dl class="kv mt"><dt>${t("Versión instalada")}</dt><dd>${esc(u.version)} <span class="mono small muted">${esc((u.commit || "").slice(0, 7))}</span></dd></dl>
+          ${hist.length ? `<label class="field mt">${t("Versión a la que volver")}<select id="rb-to">${hist.map((h) => `<option value="${esc(h.commit)}">${esc(h.version || "")} · ${esc(h.commit.slice(0, 7))} · ${h.ts ? datetime(h.ts) : ""}</option>`).join("")}</select></label>`
+            : `<p class="small muted mt">${t("Aún no hay versiones guardadas en este equipo: se volverá al cambio anterior del repositorio.")}</p>`}
+          ${docker ? `<div class="alert info mt small">${ico("info")}<div>${t("En Docker se vuelve atrás desde el equipo anfitrión; el botón te dará el comando.")}</div></div>` : ""}
+          <button class="btn mt" id="rb">${ico("refresh")}${t("Volver a la versión anterior")}</button></div>
+        <div class="card"><header><h2>${ico("power")}${t("Reiniciar Bipon")}</h2></header>
+          <p class="muted small">${t("Reinicia el servicio completo (unos segundos sin panel; el DNS vuelve solo).")}</p>
+          <button class="btn mt" id="restart">${ico("power")}${t("Reiniciar ahora")}</button></div>
+        <div class="card" style="border-color:var(--danger)"><header><h2>${ico("trash")}${t("Restablecer de fábrica")}</h2></header>
+          <p class="muted small">${t("Deja Bipon como recién instalado: se borran usuarios, configuración, dispositivos, estadísticas, certificados y reglas, y aparece el asistente inicial. Antes se guarda una copia y los datos se apartan en la carpeta de copias por si te arrepientes.")}</p>
+          <button class="btn danger mt" id="factory">${ico("trash")}${t("Restablecer de fábrica")}</button></div></div>`;
+      const waitBack = (ms = 6000) => setTimeout(function w() { fetch("/api/auth/status").then((x) => x.ok ? location.replace("/") : setTimeout(w, 2500)).catch(() => setTimeout(w, 2500)); }, ms);
+      const ST = { ok: ["check", "ok", "Bien"], fixed: ["zap", "info", "Reparado"], warn: ["alert", "warn", "Aviso"], skip: ["info", "", "No aplica"] };
+      pane.querySelector("#fix").onclick = (e) => busy(e.currentTarget, () => api.post("/system/repair")).then((r) => {
+        pane.querySelector("#fix-out").innerHTML = `<div class="alert ${r.warnings ? "warn" : "ok"}">${ico(r.warnings ? "alert" : "check")}<div><b>${esc(t(r.summary))}</b> <span class="small muted">(${r.seconds} s)</span></div></div>
+          <div class="col mt">${r.steps.map((s) => { const [ic, cls, lb] = ST[s.status] || ST.skip; return `<div class="rec row" style="flex-wrap:nowrap"><span class="badge ${cls}">${ico(ic)}${t(lb)}</span><div class="grow"><b>${esc(t(s.name))}</b><div class="small muted">${esc(s.detail)}</div></div></div>`; }).join("")}</div>`;
+        toast(t(r.summary), r.warnings ? "warn" : "ok");
+      }).catch(() => {});
+      const askPassword = (title, text, extra = "") => new Promise((resolve) => {
+        let val = null;
+        modal({ title, body: `<p>${esc(text)}</p>${extra}<label class="field mt">${t("Contraseña de administrador")}<input type="password" id="pw" autocomplete="current-password"></label>`,
+          onClose: () => resolve(val),
+          actions: [{ label: t("Cancelar") }, { label: t("Confirmar"), kind: "danger", onClick: (m) => {
+            const word = $("#word", m);
+            if (word && !/^(RESTABLECER|RESET)$/i.test(word.value.trim())) { toast(t("Escribe RESTABLECER para confirmar"), "warn"); return false; }
+            val = { password: $("#pw", m).value, confirm: word ? word.value.trim() : "" };
+          } }] });
+      });
+      pane.querySelector("#rb").onclick = async (e) => {
+        const cred = await askPassword(t("Volver a la versión anterior"), t("Bipon se reiniciará con la versión elegida (1-2 minutos sin panel). Tu configuración se conserva."));
+        if (!cred) return;
+        const commit = pane.querySelector("#rb-to")?.value || "";
+        busy(e.currentTarget, () => api.post("/system/rollback", { ...cred, commit })).then((r) => {
+          toast(t(r.message), r.ok ? "info" : "warn", 15000);
+          if (r.ok) waitBack(25000);
+        }).catch(() => {});
+      };
+      pane.querySelector("#restart").onclick = async (e) => {
+        if (!(await confirmDialog(t("Reiniciar Bipon"), t("El panel y el DNS se reinician (unos segundos)."), { danger: false, label: t("Reiniciar") }))) return;
+        busy(e.currentTarget, () => api.post("/system/restart")).then(() => { toast(t("Reiniciando…"), "info", 8000); waitBack(); }).catch(() => {});
+      };
+      pane.querySelector("#factory").onclick = async (e) => {
+        const cred = await askPassword(t("Restablecer de fábrica"), t("Esto borra toda la configuración, los usuarios y los datos. Para confirmar escribe RESTABLECER y tu contraseña."),
+          `<label class="field mt">${t("Escribe RESTABLECER")}<input id="word" autocomplete="off" data-notr></label>`);
+        if (!cred) return;
+        busy(e.currentTarget, () => api.post("/system/factory-reset", cred)).then((r) => { toast(t(r.message), "info", 15000); waitBack(8000); }).catch(() => {});
+      };
     },
     // ------------------------------------------------------------ actualizaciones
     async updates() {
