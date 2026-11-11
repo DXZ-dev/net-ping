@@ -54,6 +54,16 @@ export async function render(el, app) {
         <p class="muted small">${t("Úsalo si tu router no permite cambiar el DNS: desactiva el DHCP del router y deja que Bipon reparta las IP (con su DNS y nombres automáticos equipo.lan).")}</p>
         ${s.error ? `<div class="alert err mb">${ico("alert")}<div class="small">${esc(s.error)}</div></div>` : ""}
         <div class="opt"><div class="t"><b>${t("Activar DHCP")}</b><span>${t("Antes de activarlo se comprueba que no haya otro servidor DHCP en la red.")}</span></div>${toggle("enabled", c.enabled)}</div>
+        <h4 class="mt mb">${t("Modo")}</h4>
+        <div class="grid g2 mb">
+          <label class="preset ${c.mode === "primary" ? "active" : ""}"><input type="radio" name="mode" value="primary" class="hidden" ${c.mode === "primary" ? "checked" : ""}>
+            <b>${t("Principal (con el router de respaldo)")}</b><span>${t("Bipon reparte las IP a todos los equipos y el DHCP del router sigue encendido como secundario: si Bipon se apaga, el router toma el relevo solo.")}</span></label>
+          <label class="preset ${c.mode !== "primary" ? "active" : ""}"><input type="radio" name="mode" value="standalone" class="hidden" ${c.mode !== "primary" ? "checked" : ""}>
+            <b>${t("Único (DHCP del router apagado)")}</b><span>${t("Lo más fiable: apagas el DHCP del router y Bipon es el único que reparte IP.")}</span></label></div>
+        <div class="opt"><div class="t"><b>${t("DNS de respaldo: el router")}</b><span>${t("Entrega también la IP del router como segundo DNS: si Bipon se apaga, Internet sigue funcionando. A cambio, algunos equipos lo usarán a veces y se colará algún anuncio.")}</span></div>${toggle("backup_dns_router", c.backup_dns_router)}</div>
+        ${c.mode === "primary" && s.takeover?.total ? `<div class="alert ${s.takeover.pct >= 90 ? "ok" : "info"} mt">${ico(s.takeover.pct >= 90 ? "check" : "info")}<div class="small">
+          <b>${s.takeover.bipon} / ${s.takeover.total} ${t("equipos ya reciben su IP de Bipon")} (${s.takeover.pct} %)</b>
+          ${s.takeover.pending.length ? `<br>${t("Aún con la IP del router (pasarán a Bipon al reconectar el Wi-Fi o cuando caduque su concesión)")}: ${s.takeover.pending.slice(0, 12).map((x) => `${esc(x.name)} <span class="muted">${esc(x.ip)}</span>`).join(", ")}${s.takeover.pending.length > 12 ? "…" : ""}` : ""}</div></div>` : ""}
         <div class="form-grid mt">
           ${f("server_ip", "IP de este servidor", c.server_ip)}${f("netmask", "Máscara", c.netmask)}${f("router", "Puerta de enlace (router)", c.router)}
           ${f("range_start", "Rango: inicio", c.range_start)}${f("range_end", "Rango: fin", c.range_end)}${f("lease_time", "Concesión (s)", c.lease_time, "number")}
@@ -76,12 +86,17 @@ export async function render(el, app) {
       on(pane, "click", "[data-rel]", async (e, b) => { await api.del(`/dhcp/leases/${encodeURIComponent(b.dataset.rel)}`).catch(toastErr); show(); });
       pane.querySelector("#probe").onclick = (e) => busy(e.currentTarget, async () => {
         const r = await api.post("/dhcp/probe");
-        pane.querySelector("#probe-out").innerHTML = r.length ? r.map((x) => x.error ? `<div class="alert warn small">${esc(x.error)}</div>` : `<div class="alert ${x.own ? "ok" : "warn"} small">${ico(x.own ? "check" : "alert")}<div>${x.own ? t("Bipon") : t("Otro servidor DHCP")}: <b>${esc(x.server)}</b> · ${t("ofrece")} ${esc(x.offered_ip)} · DNS ${esc((x.dns || []).join(", "))}</div></div>`).join("") : `<div class="alert ok small">${ico("check")}<div>${t("No hay otros servidores DHCP en la red.")}</div></div>`;
+        pane.querySelector("#probe-out").innerHTML = r.length ? r.map((x) => x.error ? `<div class="alert warn small">${esc(x.error)}</div>` : `<div class="alert ${x.own ? "ok" : form.querySelector("[name=mode]:checked")?.value === "primary" ? "info" : "warn"} small">${ico(x.own ? "check" : "alert")}<div>${x.own ? t("Bipon") : form.querySelector("[name=mode]:checked")?.value === "primary" ? t("DHCP del router (respaldo)") : t("Otro servidor DHCP")}: <b>${esc(x.server)}</b> · ${t("ofrece")} ${esc(x.offered_ip)} · DNS ${esc((x.dns || []).join(", "))}</div></div>`).join("") : `<div class="alert ok small">${ico("check")}<div>${t("No hay otros servidores DHCP en la red.")}</div></div>`;
       }).catch(() => {});
       const form = pane.querySelector("#df");
+      form.querySelectorAll("[name=mode]").forEach((r) => r.onchange = () => {
+        form.querySelectorAll(".preset").forEach((p) => p.classList.toggle("active", p.contains(r)));
+        if (r.value === "primary" && Number(form.lease_time.value) > 3600) form.lease_time.value = 3600;  // relevo más rápido
+      });
       form.onsubmit = async (e) => {
         e.preventDefault();
-        const body = { enabled: form.enabled.checked, static: statics.filter((x) => x.mac && x.ip) };
+        const body = { enabled: form.enabled.checked, static: statics.filter((x) => x.mac && x.ip),
+          mode: form.querySelector("[name=mode]:checked")?.value || "standalone", backup_dns_router: form.backup_dns_router.checked };
         for (const k of ["server_ip", "netmask", "router", "range_start", "range_end", "domain", "interface"]) body[k] = form[k].value.trim();
         body.lease_time = Number(form.lease_time.value) || 86400;
         body.dns = form.dns.value.split(/[\s,]+/).filter(Boolean);

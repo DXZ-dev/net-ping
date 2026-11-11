@@ -201,6 +201,8 @@ class DHCPServer:
         c = self.cfg()
         net = ipaddress.ip_network(f"{c['server_ip']}/{c['netmask']}", strict=False)
         dns = [d for d in (c.get("dns") or [c["server_ip"]]) if d][:3]
+        if c.get("backup_dns_router") and c.get("router") and c["router"] not in dns:
+            dns = (dns + [c["router"]])[:3]  # si Bipon se apaga, los equipos siguen resolviendo con el router
         opts = [(51, struct.pack("!I", lease_time)), (58, struct.pack("!I", lease_time // 2)), (59, struct.pack("!I", lease_time * 7 // 8)),
                 (1, _ip(c["netmask"])), (3, _ip(c["router"])), (6, b"".join(_ip(d) for d in dns)), (28, _ip(str(net.broadcast_address)))]
         if c.get("domain"):
@@ -295,7 +297,26 @@ class DHCPServer:
             l["active"] = l["expires"] > now
             l["name"] = names.get(l["mac"]) or ""
         return {"running": self.running, "error": self.error, "config": self.cfg(), "suggested": self.suggest(),
-                "leases": leases, "stats": self.stats, "other_servers": self.other_servers}
+                "leases": leases, "stats": self.stats, "other_servers": self.other_servers, "takeover": self.takeover()}
+
+    def takeover(self) -> dict:
+        """Cuántos equipos en línea ya reciben su IP de Bipon (modo principal junto al DHCP del router)."""
+        c = self.cfg()
+        if not c.get("range_start"):
+            return {}
+        now = time.time()
+        active = {r["mac"] for r in self.ctx.db.query("SELECT mac FROM dhcp_leases WHERE expires>?", (now,))}
+        static = {s["mac"].lower() for s in c.get("static", [])}
+        skip = {c.get("server_ip"), c.get("router")}
+        mine, pending = [], []
+        for mac, d in self.ctx.devices.devices.items():
+            ip = d.get("ip")
+            if not ip or mac.startswith("ip:") or ":" in ip or ip in skip or not d.get("online"):
+                continue
+            item = {"mac": mac, "ip": ip, "name": d.get("name") or d.get("friendly") or d.get("hostname") or ip}
+            (mine if mac in active or mac in static else pending).append(item)
+        total = len(mine) + len(pending)
+        return {"bipon": len(mine), "total": total, "pct": round(len(mine) / total * 100) if total else 0, "pending": pending[:50]}
 
     # ---------------------------------------------------------------- detección de otros servidores
     async def probe(self, timeout: float = 4.0) -> list[dict]:

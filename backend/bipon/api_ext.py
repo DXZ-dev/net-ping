@@ -266,12 +266,17 @@ async def dhcp_put(request: Request, body: dict = Body(...)):
         _bad(exc)
     if cfg.get("enabled"):
         others = [o for o in await c.dhcp.probe() if not o.get("own") and not o.get("error")]
-        if others and not body.get("force"):
+        # modo principal: convive a propósito con el DHCP del router (que queda de respaldo)
+        if others and not body.get("force") and cfg.get("mode") != "primary":
             raise HTTPException(409, f"Hay otro servidor DHCP activo ({others[0]['server']}). Desactívalo en el router "
                                      "o confirma para continuar igualmente.")
+    if cfg.get("mode") == "primary":
+        cfg["authoritative"] = True  # responde NAK a quien pida una IP que no es de Bipon → vuelve a pedirla y la recibe de Bipon
     c.settings.set("dhcp", cfg)
     c.apply_dns_settings()
     await c.dhcp.restart()
+    if cfg.get("enabled") and cfg.get("mode") == "primary":
+        c.db.event("info", "dhcp", "DHCP de Bipon activo como principal; el del router queda de respaldo")
     return c.dhcp.status()
 
 

@@ -1727,7 +1727,18 @@ export const EN = {
   "registros": "logs",
   "dispositivos conocidos": "known devices",
   "auditoría": "audit",
-  "anomalías": "anomalies"
+  "anomalías": "anomalies",
+  "Principal (con el router de respaldo)": "Primary (router as backup)",
+  "Bipon reparte las IP a todos los equipos y el DHCP del router sigue encendido como secundario: si Bipon se apaga, el router toma el relevo solo.": "Bipon hands out IPs to every device and the router's DHCP stays on as secondary: if Bipon goes down, the router takes over on its own.",
+  "Único (DHCP del router apagado)": "Only server (router DHCP off)",
+  "Lo más fiable: apagas el DHCP del router y Bipon es el único que reparte IP.": "Most reliable: you turn off the router's DHCP and Bipon is the only one handing out IPs.",
+  "DNS de respaldo: el router": "Backup DNS: the router",
+  "Entrega también la IP del router como segundo DNS: si Bipon se apaga, Internet sigue funcionando. A cambio, algunos equipos lo usarán a veces y se colará algún anuncio.": "Also hands out the router's IP as second DNS: if Bipon goes down, Internet keeps working. In exchange, some devices will sometimes use it and an ad may slip through.",
+  "equipos ya reciben su IP de Bipon": "devices already get their IP from Bipon",
+  "Aún con la IP del router (pasarán a Bipon al reconectar el Wi-Fi o cuando caduque su concesión)": "Still on the router's IP (they'll move to Bipon when Wi-Fi reconnects or their lease expires)",
+  "DHCP del router (respaldo)": "Router DHCP (backup)",
+  "Añade esta clave en el equipo (~/.ssh/authorized_keys):": "Add this key on the device (~/.ssh/authorized_keys):",
+  "Copiar comando": "Copy command"
 };
 
 export const EN_PATTERNS = [
