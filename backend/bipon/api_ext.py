@@ -734,6 +734,30 @@ async def device_limit(request: Request, mac: str, body: dict = Body(...)):
     return await c.speedctl.apply(mac, down, up)
 
 
+@api.get("/lag")
+async def lag_get(request: Request):
+    """Ping en vivo, base, jitter, picos recientes, posibles culpables y estado de «Proteger mi partida»."""
+    return ctx(request).lag.status()
+
+
+@api.post("/lag/protect")
+async def lag_protect(request: Request, body: dict = Body(default={})):
+    c = ctx(request)
+    macs = [str(m).lower() for m in (body.get("macs") or [])]
+    if not macs and request.client:
+        mac = c.devices.mac_for(request.client.host)
+        macs = [mac] if mac else []
+    res = await c.lag.start_protect(macs, int(body.get("minutes") or 60), float(body.get("limit_mbps") or 5))
+    return {**res, "status": c.lag.status()}
+
+
+@api.delete("/lag/protect")
+async def lag_unprotect(request: Request):
+    c = ctx(request)
+    await c.lag.stop_protect()
+    return c.lag.status()
+
+
 @api.get("/speedctl")
 async def speedctl_get(request: Request):
     """Método con el que se limitaría la velocidad de cada dispositivo."""

@@ -89,6 +89,7 @@ class DNSServer:
         self.log_queries = True
         self.block_canary = True
         self.block_icloud = False
+        self.prefer_ipv4 = False  # filtra AAAA (y HTTPS/SVCB con pistas IPv6): los equipos usan IPv4
         self.prefetch = True
         self.local: dict[tuple[str, int], list[str]] = {}
         self.cf = {"enabled": False, "domain": "", "server": ""}
@@ -307,6 +308,11 @@ class DNSServer:
             r = req.reply()
             r.header.rcode = RCODE.NXDOMAIN
             return r, ST_LOCAL, "Canario DoH / Private Relay", "local"
+
+        # 2b) preferencia IPv4: sin direcciones IPv6 en las respuestas, los equipos conectan por IPv4
+        #     (útil cuando el IPv6 del proveedor va por túnel o CGNAT y añade latencia o cortes)
+        if self.prefer_ipv4 and qtype in (QTYPE.AAAA, 65):
+            return req.reply(), ST_LOCAL, "Preferencia IPv4", "local"
 
         # 3) PTR de la red local
         if qtype == QTYPE.PTR and _is_private_reverse(name):

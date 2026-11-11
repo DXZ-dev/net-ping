@@ -72,6 +72,8 @@ class Context:
         self.rates = LiveRates(self)
         from .speedctl import SpeedControl
         self.speedctl = SpeedControl(self)
+        from .lagguard import LagGuard
+        self.lag = LagGuard(self)
         self.routerctl = RouterControl(self)
         self.configs = ConfigProfiles(self)
         self.updater = Updater(self)
@@ -113,6 +115,7 @@ class Context:
             pass
 
     def _log_query(self, row: tuple) -> None:
+        self.lag.observe(row[1], row[2])
         if self.anonymize:
             import hashlib
             row = (row[0], "anon-" + hashlib.sha256((self.settings.get("secret") + row[1]).encode()).hexdigest()[:8], *row[2:])
@@ -160,6 +163,7 @@ class Context:
         self.dns.log_queries = bool(d.get("log_queries", True))
         self.dns.block_canary = bool(d.get("block_doh_canary", True))
         self.dns.block_icloud = bool(d.get("block_icloud_relay", False))
+        self.dns.prefer_ipv4 = bool(d.get("prefer_ipv4", False))
         self.dns.prefetch = bool(d.get("prefetch", True))
         self.dns.cf = d.get("conditional_forwarding") or {}
         self.dns.set_local_records(d.get("local_records") or [])
@@ -221,6 +225,7 @@ class Context:
         self._bg(self.wifi.loop(), "wifi")
         self._bg(self.router.loop(), "router")
         self._bg(self.rates.loop(), "velocidad en vivo")
+        self._bg(self.lag.loop(), "vigilante de lag")
         self._bg(self.updater.loop(), "actualizaciones")
         self._bg(self.captive.loop(), "portal cautivo")
         self.db.event("info", "sistema", "Bipon Net iniciado")

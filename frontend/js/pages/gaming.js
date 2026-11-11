@@ -1,4 +1,5 @@
 import { api, esc, ico, ms, ago, toast, toastErr, busy, on, toggle, empty, $, $$ } from "../lib.js";
+import { mountLag } from "./lag.js";
 
 export const title = "Gaming y streaming";
 export const subtitle = "Mínima latencia y cero interrupciones para juegos competitivos y streaming";
@@ -8,6 +9,7 @@ export async function render(el, app) {
   const cfg = st.config || {};
   const active = new Set(cfg.groups?.length ? cfg.groups : Object.keys(st.groups));
   el.innerHTML = `
+    <div id="lag" class="mb"></div>
     <div class="grid g4 mb">
       ${stat("Modo", cfg.enabled !== false ? "Activo" : "Desactivado", "", cfg.enabled !== false ? "green" : "red", "console")}
       ${stat("Dominios prioritarios", `${st.hot}/${st.domains}`, "listos en caché (0 ms)", "cyan", "zap")}
@@ -42,6 +44,7 @@ export async function render(el, app) {
     </div>
 
     <div class="card mt" id="qos"></div>`;
+  mountLag(el.querySelector("#lag"));
 
   on(el, "click", "[data-g]", async (e, b) => {
     const g = b.dataset.g;
