@@ -233,7 +233,14 @@ async def tokens_delete(request: Request, tid: int):
 # Panel y estadísticas
 # =====================================================================
 def _device_names(c) -> dict[str, str]:
-    return {d["ip"]: (d.get("name") or d.get("hostname") or d["ip"]) for d in c.devices.devices.values() if d.get("ip")}
+    """Nombre por IP y por MAC (las consultas se agrupan por MAC cuando se conoce)."""
+    out = {}
+    for m, d in c.devices.devices.items():
+        name = d.get("name") or d.get("friendly") or d.get("hostname") or d.get("ip") or m
+        out[m] = name
+        if d.get("ip"):
+            out[d["ip"]] = name
+    return out
 
 
 @api.get("/stats/summary")
@@ -244,7 +251,7 @@ async def stats_summary(request: Request, hours: int = Query(24, ge=1, le=24 * 9
 
     def compute():
         t = db.one(f"""SELECT COUNT(*) total, SUM(status IN {BLOCKED_SQL}) blocked, SUM(status IN (1,10)) cached,
-                       COUNT(DISTINCT client) clients, AVG(CASE WHEN status=0 THEN rtt END) fwd_rtt, AVG(rtt) avg_rtt
+                       COUNT(DISTINCT COALESCE(mac, client)) clients, AVG(CASE WHEN status=0 THEN rtt END) fwd_rtt, AVG(rtt) avg_rtt
                        FROM queries WHERE ts>=?""", (since,))
         bucket = max(60, int(hours * 3600 / 96))
         timeline = db.query(f"""SELECT CAST(ts/{bucket} AS INT)*{bucket} AS t, COUNT(*) total,
@@ -252,7 +259,8 @@ async def stats_summary(request: Request, hours: int = Query(24, ge=1, le=24 * 9
                                 FROM queries WHERE ts>=? GROUP BY t ORDER BY t""", (since,))
         top_domains = db.query(f"SELECT domain, COUNT(*) n FROM queries WHERE ts>=? AND status NOT IN {BLOCKED_SQL} GROUP BY domain ORDER BY n DESC LIMIT 10", (since,))
         top_blocked = db.query(f"SELECT domain, COUNT(*) n FROM queries WHERE ts>=? AND status IN {BLOCKED_SQL} GROUP BY domain ORDER BY n DESC LIMIT 10", (since,))
-        top_clients = db.query(f"SELECT client, COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked FROM queries WHERE ts>=? GROUP BY client ORDER BY n DESC LIMIT 10", (since,))
+        top_clients = db.query(f"""SELECT COALESCE(mac, client) who, MAX(mac) mac, MAX(client) client,
+                                    COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked FROM queries WHERE ts>=? GROUP BY who ORDER BY n DESC LIMIT 10""", (since,))
         qtypes = db.query("SELECT qtype, COUNT(*) n FROM queries WHERE ts>=? GROUP BY qtype ORDER BY n DESC LIMIT 8", (since,))
         reasons = db.query(f"SELECT status, COUNT(*) n FROM queries WHERE ts>=? GROUP BY status ORDER BY n DESC", (since,))
         upstreams = db.query("SELECT upstream, COUNT(*) n, AVG(rtt) rtt FROM queries WHERE ts>=? AND status=0 AND upstream<>'' GROUP BY upstream ORDER BY n DESC LIMIT 6", (since,))
@@ -261,7 +269,7 @@ async def stats_summary(request: Request, hours: int = Query(24, ge=1, le=24 * 9
     t, bucket, timeline, top_domains, top_blocked, top_clients, qtypes, reasons, upstreams = await asyncio.to_thread(compute)
     names = _device_names(c)
     for cl in top_clients:
-        cl["name"] = names.get(cl["client"], cl["client"])
+        cl["name"] = names.get(cl.get("mac") or "", "") or names.get(cl["client"], cl["client"])
     total = t["total"] or 0
     return {
         "hours": hours, "bucket": bucket, "total": total, "blocked": t["blocked"] or 0, "cached": t["cached"] or 0,
@@ -326,9 +334,9 @@ async def queries(request: Request, limit: int = Query(100, le=1000), offset: in
                   domain: str = "", status: str = "", since: float = 0):
     c = ctx(request)
     where, params = ["1=1"], []
-    if client:
-        where.append("client=?")
-        params.append(client)
+    if client:  # IP o MAC del dispositivo
+        where.append("(client=? OR mac=?)")
+        params += [client, client.lower()]
     if domain:
         where.append("domain LIKE ?")
         params.append(f"%{domain.lower()}%")
@@ -349,7 +357,7 @@ async def queries(request: Request, limit: int = Query(100, le=1000), offset: in
                              (*params, limit, offset))
     names = _device_names(c)
     for r in rows:
-        r["client_name"] = names.get(r["client"], "")
+        r["client_name"] = names.get(r.get("mac") or "", "") or names.get(r["client"], "")
         r["status_name"] = STATUS_NAMES.get(r["status"], "?")
         r["blocked"] = r["status"] in BLOCKED_STATUSES
     return rows
@@ -635,13 +643,13 @@ async def devices_list(request: Request):
     c = ctx(request)
     since = time.time() - 86400
     c.db.flush_queries()
-    counts = {r["client"]: r for r in await c.db.aquery(
-        f"SELECT client, COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked, MAX(ts) last FROM queries WHERE ts>=? GROUP BY client", (since,))}
+    counts = {r["who"]: r for r in await c.db.aquery(
+        f"SELECT COALESCE(mac, client) who, COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked, MAX(ts) last FROM queries WHERE ts>=? GROUP BY who", (since,))}
     out = []
     now = time.time()
     rates = c.rates.snapshot()
     for d in c.devices.devices.values():
-        q = counts.get(d.get("ip") or "", {})
+        q = counts.get(d["mac"]) or counts.get(d.get("ip") or "", {})
         pol = c.devices.policy_for(d["ip"]) if d.get("ip") else None
         out.append({**d, "queries": q.get("n", 0), "blocked": q.get("blocked", 0), "last_query": q.get("last"),
                     "parent_effective": d.get("parent") or d.get("auto_parent"),
@@ -721,8 +729,9 @@ async def device_detail(request: Request, mac: str):
     since = time.time() - 86400
     ip = d.get("ip") or ""
     c.db.flush_queries()
-    top = await c.db.aquery(f"SELECT domain, COUNT(*) n, MAX(status IN {BLOCKED_SQL}) blocked FROM queries WHERE client=? AND ts>=? GROUP BY domain ORDER BY n DESC LIMIT 15", (ip, since))
-    hourly = await c.db.aquery(f"SELECT CAST(ts/3600 AS INT)*3600 t, COUNT(*) total, SUM(status IN {BLOCKED_SQL}) blocked FROM queries WHERE client=? AND ts>=? GROUP BY t ORDER BY t", (ip, since))
+    who = "(mac=? OR (mac IS NULL AND client=?))"  # por MAC (sigue al equipo aunque cambie de IP)
+    top = await c.db.aquery(f"SELECT domain, COUNT(*) n, MAX(status IN {BLOCKED_SQL}) blocked FROM queries WHERE {who} AND ts>=? GROUP BY domain ORDER BY n DESC LIMIT 15", (mac, ip, since))
+    hourly = await c.db.aquery(f"SELECT CAST(ts/3600 AS INT)*3600 t, COUNT(*) total, SUM(status IN {BLOCKED_SQL}) blocked FROM queries WHERE {who} AND ts>=? GROUP BY t ORDER BY t", (mac, ip, since))
     pol = c.devices.policy_for(ip) if ip else None
     return {**d, "top_domains": top, "hourly": hourly,
             "policy": pol.__dict__ | {"services": sorted(pol.services)} if pol else None}

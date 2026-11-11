@@ -124,7 +124,7 @@ export async function render(el) {
           <td><b>${esc(dname(d))}</b>${d.parent_effective ? `<div class="small muted">↳ ${esc(dname(data.devices.find((x) => x.mac === d.parent_effective) || {}))}</div>` : ""}</td>
           <td class="mono">${esc(d.ip || "")}</td><td class="mono muted">${esc(d.mac)}</td><td class="truncate" style="max-width:220px">${esc(d.brand_name || d.vendor || "")}${d.model ? `<div class="small muted">${esc(d.model)}</div>` : ""}</td>
           <td>${esc(profileOf(d).name)}</td><td class="right">${ms(d.latency)}</td><td class="right">${rate(d)}</td><td class="right">${num(d.queries)}</td>
-          <td><span class="dot dot-${d.internet_blocked ? "err" : d.online ? "ok" : "off"}"></span> ${d.online ? t("ahora") : ago(d.last_seen)}</td></tr>`).join("")}</tbody></table></div></div>`;
+          <td><span class="dot dot-${d.internet_blocked ? "err" : d.sleeping ? "warn" : d.online ? "ok" : "off"}"></span> ${d.sleeping ? t("en reposo (Wi-Fi)") : d.online ? t("ahora") : ago(d.last_seen)}</td></tr>`).join("")}</tbody></table></div></div>`;
     } else {
       drawMap(box, ds);
     }
@@ -283,7 +283,7 @@ export async function render(el) {
   }
 
   function node(d, x, y, r, small = false) {
-    const color = d.internet_blocked ? "var(--err)" : d.online ? "var(--ok)" : "var(--muted)";
+    const color = d.internet_blocked ? "var(--err)" : d.sleeping ? "var(--warn)" : d.online ? "var(--ok)" : "var(--muted)";
     const label = dname(d);
     const icon = brandIcon(d.brand, d.kind);
     return `<g class="node" data-mac="${esc(d.mac)}" transform="translate(${x},${y})">

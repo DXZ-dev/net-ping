@@ -179,3 +179,17 @@ def test_wireguard_relay():
     assert "DNAT --to-destination 192.168.1.50:3074" in vps and "PersistentKeepalive" in r["files"][1]["content"]
     with pytest.raises(ValueError):
         generate({"mode": "home", "endpoint": "bad host; rm"})
+
+
+def test_cache_trim_and_usage():
+    c = DNSCache(size=10)
+    for i in range(10):
+        c.put(DNSCache.key(f"d{i}.com", QTYPE.A), _answer(f"d{i}.com"))
+    assert c.usage() == 100
+    freed = c.trim(70)
+    assert freed == 3 and c.usage() == 70 and DNSCache.key("d9.com", QTYPE.A) in c._d  # se conserva lo más reciente
+
+
+def test_parse_size():
+    from bipon.cacheguard import parse_size
+    assert parse_size("64m") == 64 * 1024 ** 2 and parse_size("1g") == 1024 ** 3 and parse_size("512k") == 512 * 1024

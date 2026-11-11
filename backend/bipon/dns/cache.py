@@ -114,6 +114,20 @@ class DNSCache:
         self._d.clear()
         return n
 
+    def usage(self) -> float:
+        return len(self._d) / self.size * 100 if self.size else 0.0
+
+    def trim(self, target_pct: float = 70.0) -> int:
+        """Libera espacio: primero lo caducado hace tiempo, luego lo menos usado (LRU), hasta target_pct."""
+        before = len(self._d)
+        now = time.monotonic()
+        for k in [k for k, e in self._d.items() if now - e.expires > 600]:
+            del self._d[k]
+        limit = int(self.size * target_pct / 100)
+        while len(self._d) > limit:
+            self._d.popitem(last=False)
+        return before - len(self._d)
+
     def stats(self) -> dict:
         total = self.hits + self.misses
         return {

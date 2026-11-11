@@ -214,6 +214,10 @@ class Database:
                          ("dhcp_vendor", "TEXT")):
             if col not in dcols:
                 self.conn.execute(f"ALTER TABLE devices ADD COLUMN {col} {typ}")
+        qcols = {r[1] for r in self.conn.execute("PRAGMA table_info(queries)")}
+        if "mac" not in qcols:  # registro por MAC: el historial sigue al dispositivo aunque cambie de IP
+            self.conn.execute("ALTER TABLE queries ADD COLUMN mac TEXT")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_queries_mac_ts ON queries(mac, ts)")
         cols = {r[1] for r in self.conn.execute("PRAGMA table_info(speedtests)")}
         for col, typ in (("bufferbloat", "REAL"), ("grade", "TEXT"), ("loaded_ping", "REAL")):
             if col not in cols:
@@ -267,8 +271,8 @@ class Database:
         with self._lock:
             self.conn.execute("BEGIN")
             self.conn.executemany(
-                "INSERT INTO queries(ts,client,domain,qtype,status,reason,upstream,rtt) VALUES (?,?,?,?,?,?,?,?)",
-                batch,
+                "INSERT INTO queries(ts,client,domain,qtype,status,reason,upstream,rtt,mac) VALUES (?,?,?,?,?,?,?,?,?)",
+                [r if len(r) == 9 else (*r[:8], None) for r in batch],
             )
             self.conn.execute("COMMIT")
         return len(batch)

@@ -758,6 +758,66 @@ async def lag_unprotect(request: Request):
     return c.lag.status()
 
 
+@api.get("/system/logs")
+async def system_logs(request: Request, source: str = "events", level: str = "", q: str = "", limit: int = 300, category: str = ""):
+    """Registros para diagnosticar problemas: eventos, aplicación o Unbound."""
+    from . import applog
+    c = ctx(request)
+    limit = max(10, min(int(limit), 2000))
+    lv = {"info": ("info", "warning", "error"), "warning": ("warning", "error"), "error": ("error",)}.get(level)
+    if source == "app":
+        return {"source": "app", "rows": applog.read(level, q, limit)}
+    if source == "unbound":
+        lines = list(c.unbound.logs)[::-1]
+        rows = [{"ts": None, "level": "error" if re.search(r"error|fail|fatal", ln, re.I) else "warning" if "warning" in ln.lower() else "info",
+                 "source": "unbound", "message": ln} for ln in lines if not q or q.lower() in ln.lower()]
+        if lv:
+            rows = [r for r in rows if r["level"] in lv]
+        return {"source": "unbound", "rows": rows[:limit]}
+    where, params = ["1=1"], []
+    if lv:
+        where.append(f"level IN ({','.join('?' * len(lv))})")
+        params += list(lv)
+    if category:
+        where.append("category=?")
+        params.append(category)
+    if q:
+        where.append("message LIKE ?")
+        params.append(f"%{q}%")
+    rows = await c.db.aquery(f"SELECT ts, level, category source, message FROM events WHERE {' AND '.join(where)} ORDER BY id DESC LIMIT ?", (*params, limit))
+    cats = [r["category"] for r in await c.db.aquery("SELECT DISTINCT category FROM events ORDER BY category")]
+    counts = {r["level"]: r["n"] for r in await c.db.aquery("SELECT level, COUNT(*) n FROM events WHERE ts>=? GROUP BY level", (time.time() - 86400,))}
+    return {"source": "events", "rows": rows, "categories": cats, "counts_24h": counts}
+
+
+@api.get("/cacheguard")
+async def cacheguard_get(request: Request):
+    c = ctx(request)
+    st = c.cacheguard.status()
+    if not st["last"]:
+        st["last"] = {"bipon": round(c.dns.cache.usage(), 1), "unbound": await c.cacheguard.unbound_usage()}
+    return st
+
+
+@api.put("/cacheguard")
+async def cacheguard_put(request: Request, body: dict = Body(...)):
+    c = ctx(request)
+    cfg = c.cacheguard.cfg()
+    if "enabled" in body:
+        cfg["enabled"] = bool(body["enabled"])
+    if "threshold" in body:
+        cfg["threshold"] = max(50, min(int(body["threshold"]), 99))
+    c.settings.set("cache_guard", cfg, notify=False)
+    return c.cacheguard.status()
+
+
+@api.post("/cacheguard/clean")
+async def cacheguard_clean(request: Request):
+    c = ctx(request)
+    await c.cacheguard.check(force=True)
+    return c.cacheguard.status()
+
+
 @api.get("/speedctl")
 async def speedctl_get(request: Request):
     """Método con el que se limitaría la velocidad de cada dispositivo."""
@@ -1029,7 +1089,7 @@ async def device_activity(request: Request, mac: str, hours: int = 24):
         raise HTTPException(404, "Dispositivo sin IP")
     c.db.flush_queries()
     since = time.time() - min(hours, 24 * 30) * 3600
-    rows = await c.db.aquery("SELECT ts, domain, status FROM queries WHERE client=? AND ts>=? ORDER BY ts", (d["ip"], since))
+    rows = await c.db.aquery("SELECT ts, domain, status FROM queries WHERE (mac=? OR (mac IS NULL AND client=?)) AND ts>=? ORDER BY ts", (mac, d["ip"], since))
     from .catalog import SERVICE_MAP
     from .dns.filter import BLOCKED_STATUSES
     groups: dict[str, dict] = {}

@@ -21,6 +21,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
 )
 log = logging.getLogger("bipon")
+from . import applog  # noqa: E402
+
+applog.install()
 
 
 @asynccontextmanager

@@ -192,6 +192,106 @@ class DeviceManager:
         finally:
             sock.close()
 
+    # ---- presencia fiable en Wi-Fi --------------------------------------------
+    @staticmethod
+    def _wifi_like(d: dict) -> bool:
+        """Móviles, tablets, portátiles y MAC aleatorias (privadas): casi siempre Wi-Fi con ahorro de energía."""
+        mac = d.get("mac") or ""
+        try:
+            random_mac = bool(int(mac.split(":")[0], 16) & 0x02)
+        except ValueError:
+            random_mac = False
+        return random_mac or d.get("kind") in ("phone", "tablet", "laptop", "watch", "speaker", "tv", "iot", "camera")
+
+    async def _wake_probe(self, targets: list[dict], ifaces: list[dict]) -> set[str]:
+        """Pregunta directamente a cada dispositivo por su MAC (ARP unicast, 3 intentos) y toca puertos
+        que responden aunque el móvil esté en reposo. El punto de acceso guarda las tramas unicast hasta
+        que el equipo despierta, así que contestan aunque ignoren los sondeos de difusión.
+        Devuelve las MAC que respondieron."""
+        seen: set[str] = set()
+        if not targets:
+            return seen
+        itf = ifaces[0] if ifaces else None
+        raw = None
+        if itf and itf.get("name") and itf.get("name") != "?" and hasattr(socket, "AF_PACKET"):
+            try:
+                raw = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806))
+                raw.bind((itf["name"], 0))
+                raw.setblocking(False)
+            except (OSError, PermissionError):
+                raw = None
+        mac_s = (itf or {}).get("mac") or ""
+        if not mac_s and itf and itf.get("name") not in (None, "?"):
+            try:
+                mac_s = open(f"/sys/class/net/{itf['name']}/address").read().strip()
+            except OSError:
+                mac_s = ""
+        src_mac = bytes.fromhex(mac_s.replace(":", "")) if mac_s else b""
+        src_ip = socket.inet_aton(itf["ip"]) if itf else b""
+        by_ip = {t["ip"]: t["mac"] for t in targets}
+
+        def arp_req(dst_mac: str, dst_ip: str) -> bytes:
+            dm = bytes.fromhex(dst_mac.replace(":", ""))
+            return dm + src_mac + b"\x08\x06" + b"\x00\x01\x08\x00\x06\x04\x00\x01" + src_mac + src_ip + b"\x00" * 6 + socket.inet_aton(dst_ip)
+
+        async def tcp_touch(ip: str):
+            # iPhone/iPad (62078), Android/Chromecast (8008/8009), Windows (445/139), genéricos (80/443)
+            for port in (62078, 8009, 445, 80, 443):
+                try:
+                    r, w = await asyncio.wait_for(asyncio.open_connection(ip, port), 0.8)
+                    w.close()
+                    return ip
+                except ConnectionRefusedError:
+                    return ip  # un RST también demuestra que está despierto
+                except Exception:
+                    continue
+            return None
+
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp.setblocking(False)
+        try:
+            for attempt in range(3):
+                if all(t["mac"] in seen for t in targets):
+                    break
+                for t in targets:
+                    if t["mac"] in seen:
+                        continue
+                    if raw is not None and len(src_mac) == 6:
+                        try:
+                            raw.send(arp_req(t["mac"], t["ip"]))
+                        except OSError:
+                            pass
+                    for port in (5353, 9):  # mDNS y «discard»: fuerzan ARP y despiertan la pila de red
+                        try:
+                            udp.sendto(b"\x00", (t["ip"], port))
+                        except OSError:
+                            pass
+                if raw is not None:
+                    end = time.time() + 1.2
+                    while time.time() < end and not all(t["mac"] in seen for t in targets):
+                        try:
+                            pkt = raw.recv(64)
+                            if len(pkt) >= 42 and pkt[12:14] == b"\x08\x06" and pkt[20:22] == b"\x00\x02":
+                                ip = socket.inet_ntoa(pkt[28:32])
+                                mac = pkt[22:28].hex(":")
+                                if by_ip.get(ip) == mac:
+                                    seen.add(mac)
+                        except BlockingIOError:
+                            await asyncio.sleep(0.05)
+                        except OSError:
+                            break
+                else:
+                    await asyncio.sleep(1.2)
+            missing = [t for t in targets if t["mac"] not in seen]
+            for ip in await asyncio.gather(*(tcp_touch(t["ip"]) for t in missing[:40])):
+                if ip and by_ip.get(ip):
+                    seen.add(by_ip[ip])
+        finally:
+            udp.close()
+            if raw is not None:
+                raw.close()
+        return seen
+
     async def _ptr_lookup(self, ip: str, servers: list[str]) -> str:
         name = ipaddress.ip_address(ip).reverse_pointer
         q = DNSRecord.question(name, "PTR").pack()
@@ -290,9 +390,19 @@ class DeviceManager:
         self.gateway = netinfo.default_gateway()
         self.self_ip = ifaces[0]["ip"] if ifaces else netinfo.primary_ip()
         await self._probe(self._hosts(ifaces))
-        await asyncio.sleep(2.5)
+        now0 = time.time()
+        quiet = [{"mac": m, "ip": d["ip"]} for m, d in self.devices.items()
+                 if d.get("ip") and not m.startswith("ip:") and d.get("ip") not in (self.self_ip, self.gateway)
+                 and 40 < now0 - max(self._last_seen_arp.get(m, d.get("last_seen") or 0), self.activity.get(d["ip"], 0)) < 1800]
+        woke = await self._wake_probe(quiet, ifaces) if quiet else set()
+        if not quiet:
+            await asyncio.sleep(2.5)
         neigh = await asyncio.to_thread(netinfo.neighbors)
         now = time.time()
+        for mac in woke:
+            d = self.devices.get(mac)
+            if d and d.get("ip"):
+                self._mark_seen(mac, d["ip"], now)
         new = []
         for n in neigh:
             if n["state"] in ("FAILED", "INCOMPLETE"):
@@ -311,7 +421,10 @@ class DeviceManager:
                 continue
             arp = self._last_seen_arp.get(mac, d.get("last_seen") or 0)
             dns = self.activity.get(d.get("ip") or "", 0)
-            if now - max(arp, dns) > grace:
+            age = now - max(arp, dns)
+            limit = max(grace, 420) if self._wifi_like({**d, "mac": mac}) else grace  # un móvil en reposo puede tardar en contestar
+            d["sleeping"] = bool(self._wifi_like({**d, "mac": mac}) and age > 90 and age <= limit)
+            if age > limit:
                 self.db.execute("UPDATE devices SET online=0 WHERE mac=?", (mac,))
                 d["online"] = 0
                 self.publish("offline", mac)

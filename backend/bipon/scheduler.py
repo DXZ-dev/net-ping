@@ -95,13 +95,13 @@ class Scheduler:
         end = time.time()
         start = end - days * 86400
         db.flush_queries()
-        q = db.one(f"SELECT COUNT(*) total, SUM(status IN {BLOCKED_SQL}) blocked, COUNT(DISTINCT client) clients FROM queries WHERE ts>=?", (start,))
+        q = db.one(f"SELECT COUNT(*) total, SUM(status IN {BLOCKED_SQL}) blocked, COUNT(DISTINCT COALESCE(mac, client)) clients FROM queries WHERE ts>=?", (start,))
         top_blocked = db.query(f"SELECT domain, COUNT(*) n FROM queries WHERE ts>=? AND status IN {BLOCKED_SQL} GROUP BY domain ORDER BY n DESC LIMIT 10", (start,))
-        per_client = db.query(f"SELECT client, COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked FROM queries WHERE ts>=? GROUP BY client ORDER BY n DESC LIMIT 15", (start,))
+        per_client = db.query(f"SELECT COALESCE(mac, client) who, MAX(mac) mac, MAX(client) client, COUNT(*) n, SUM(status IN {BLOCKED_SQL}) blocked FROM queries WHERE ts>=? GROUP BY who ORDER BY n DESC LIMIT 15", (start,))
         names = {d.get("ip"): (d.get("name") or d.get("hostname") or d.get("ip")) for d in self.ctx.devices.devices.values() if d.get("ip")}
         macnames = {m: (d.get("name") or d.get("hostname") or d.get("ip") or m) for m, d in self.ctx.devices.devices.items()}
         for r in per_client:
-            r["name"] = names.get(r["client"], r["client"])
+            r["name"] = macnames.get(r.get("mac") or "") or names.get(r["client"], r["client"])
         since_day = datetime.fromtimestamp(start).date().isoformat()
         screen = db.query("SELECT mac, SUM(minutes) minutes FROM usage WHERE day>=? AND service=? GROUP BY mac ORDER BY minutes DESC LIMIT 15",
                           (since_day, ALL))

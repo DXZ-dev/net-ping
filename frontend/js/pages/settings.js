@@ -8,7 +8,7 @@ export const subtitle = "Apariencia, idioma, actualizaciones, perfiles de config
 export async function render(el, app) {
   const admin = app.session?.user?.role === "admin";
   const TABS = [["look", "Apariencia", "sun"], ["lang", "Idioma y región", "globe"], ...(admin ? [["updates", "Actualizaciones", "download"], ["configs", "Perfiles de configuración", "list"],
-    ["system", "Sistema", "settings"], ["audit", "Auditoría", "shield"]] : []), ["account", "Mi cuenta", "key"]];
+    ["system", "Sistema", "settings"], ["logs", "Registros", "list"], ["audit", "Auditoría", "shield"]] : []), ["account", "Mi cuenta", "key"]];
   let tab = sessionStorage.getItem("np-set-tab") || "look";
   if (!TABS.some((x) => x[0] === tab)) tab = "look";
   el.innerHTML = `<div class="tabs mb">${TABS.map(([k, l, i]) => `<button data-tab="${k}">${ico(i)}${t(l)}</button>`).join("")}</div><div id="pane"></div>`;
@@ -148,6 +148,43 @@ export async function render(el, app) {
       pane.querySelector("#restore").onchange = async (e) => { const file = e.target.files[0]; if (!file) return; try { await api.post("/restore", JSON.parse(await file.text())); toast(t("Copia restaurada")); } catch (err) { toastErr(err); } };
     },
     // ------------------------------------------------------------ auditoría
+    async logs() {
+      const st = { source: "events", level: "", q: "", category: "" };
+      pane.innerHTML = `<div class="card"><header><h2>${ico("list")}${t("Registros del sistema")} <span class="live-dot"></span></h2>
+          <button class="btn sm" id="lg-dl">${ico("download")}${t("Descargar")}</button></header>
+        <p class="muted small mb">${t("Para encontrar problemas: eventos de Bipon (caídas, picos de lag, bloqueos, cambios), el registro interno de la aplicación y el de Unbound. Se actualiza solo cada 5 s.")}</p>
+        <div class="row mb" style="flex-wrap:wrap;gap:8px">
+          <div class="btn-group" id="lg-src"><button data-s="events" class="active">${t("Eventos")}</button><button data-s="app">${t("Aplicación")}</button><button data-s="unbound">Unbound</button></div>
+          <select id="lg-lvl" style="width:auto"><option value="">${t("Todos los niveles")}</option><option value="info">${t("Info y superior")}</option><option value="warning">${t("Avisos y errores")}</option><option value="error">${t("Sólo errores")}</option></select>
+          <select id="lg-cat" style="width:auto"><option value="">${t("Todas las categorías")}</option></select>
+          <input id="lg-q" placeholder="${t("Buscar en los registros…")}" style="max-width:260px"></div>
+        <div id="lg-sum" class="row small mb" style="gap:10px"></div>
+        <div class="table-wrap" style="max-height:60vh;overflow:auto"><table class="logs"><tbody id="lg-rows"></tbody></table></div></div>`;
+      const rowsEl = pane.querySelector("#lg-rows"), cat = pane.querySelector("#lg-cat");
+      let last = [];
+      const badge = (l) => `<span class="badge ${l === "error" || l === "critical" ? "err" : l === "warning" ? "warn" : "info"}">${esc(t(l === "warning" ? "aviso" : l === "error" || l === "critical" ? "error" : "info"))}</span>`;
+      const load = async () => {
+        if (!document.body.contains(rowsEl)) return clearInterval(timer);
+        const r = await api.get(`/system/logs?source=${st.source}&level=${st.level}&q=${encodeURIComponent(st.q)}&category=${encodeURIComponent(st.category)}&limit=400`).catch(() => null);
+        if (!r) return;
+        last = r.rows;
+        cat.parentElement && (cat.style.display = st.source === "events" ? "" : "none");
+        if (r.categories && cat.options.length <= 1) r.categories.forEach((c) => cat.insertAdjacentHTML("beforeend", `<option value="${esc(c)}">${esc(t(c))}</option>`));
+        pane.querySelector("#lg-sum").innerHTML = r.counts_24h ? `<span class="muted">${t("Últimas 24 h")}:</span> ${["error", "warning", "info"].map((l) => `${badge(l)} ${r.counts_24h[l] || 0}`).join(" ")}` : "";
+        rowsEl.innerHTML = r.rows.length ? r.rows.map((x) => `<tr><td class="nowrap small muted">${x.ts ? datetime(x.ts) : ""}</td><td>${badge(x.level)}</td><td class="small muted nowrap">${esc(x.source || "")}</td><td class="small mono" style="white-space:pre-wrap;word-break:break-word">${esc(x.message)}</td></tr>`).join("")
+          : `<tr><td class="muted">${t("Sin registros")}</td></tr>`;
+      };
+      pane.querySelector("#lg-src").onclick = (e) => { const b = e.target.closest("[data-s]"); if (!b) return; st.source = b.dataset.s; pane.querySelectorAll("#lg-src button").forEach((x) => x.classList.toggle("active", x === b)); load(); };
+      pane.querySelector("#lg-lvl").onchange = (e) => { st.level = e.target.value; load(); };
+      cat.onchange = (e) => { st.category = e.target.value; load(); };
+      let deb; pane.querySelector("#lg-q").oninput = (e) => { clearTimeout(deb); deb = setTimeout(() => { st.q = e.target.value.trim(); load(); }, 300); };
+      pane.querySelector("#lg-dl").onclick = () => {
+        const txt = last.map((x) => `${x.ts ? new Date(x.ts * 1000).toISOString() : ""}\t${x.level}\t${x.source || ""}\t${x.message}`).join("\n");
+        const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain" })); a.download = `bipon-${st.source}-${Date.now()}.log`; a.click();
+      };
+      await load();
+      const timer = setInterval(load, 5000);
+    },
     async audit() {
       const [rows, events] = await Promise.all([api.get("/audit?limit=300"), api.get("/events?limit=150")]);
       pane.innerHTML = `<div class="grid g2"><div class="card"><header><h2>${ico("shield")}${t("Quién cambió qué")}</h2></header>${rows.length ? `<div class="table-wrap"><table><thead><tr><th>${t("Fecha")}</th><th>${t("Usuario")}</th><th>${t("Acción")}</th><th></th></tr></thead><tbody>

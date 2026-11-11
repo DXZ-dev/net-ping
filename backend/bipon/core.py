@@ -74,6 +74,8 @@ class Context:
         self.speedctl = SpeedControl(self)
         from .lagguard import LagGuard
         self.lag = LagGuard(self)
+        from .cacheguard import CacheGuard
+        self.cacheguard = CacheGuard(self)
         self.routerctl = RouterControl(self)
         self.configs = ConfigProfiles(self)
         self.updater = Updater(self)
@@ -116,10 +118,13 @@ class Context:
 
     def _log_query(self, row: tuple) -> None:
         self.lag.observe(row[1], row[2])
+        mac = self.devices.mac_for(row[1])  # el historial se guarda por MAC: si el equipo cambia de IP sigue siendo el mismo
         if self.anonymize:
             import hashlib
-            row = (row[0], "anon-" + hashlib.sha256((self.settings.get("secret") + row[1]).encode()).hexdigest()[:8], *row[2:])
-        self.db.log_query(row)
+            h = lambda v: "anon-" + hashlib.sha256((self.settings.get("secret") + v).encode()).hexdigest()[:8]  # noqa: E731
+            row = (row[0], h(row[1]), *row[2:8])
+            mac = h(mac) if mac else None
+        self.db.log_query((*row[:8], mac))
 
     def _new_device(self, d: dict) -> None:
         if not self.devices.last_scan:  # el primer escaneo descubre toda la red: no se avisa de cada equipo
@@ -226,6 +231,7 @@ class Context:
         self._bg(self.router.loop(), "router")
         self._bg(self.rates.loop(), "velocidad en vivo")
         self._bg(self.lag.loop(), "vigilante de lag")
+        self._bg(self.cacheguard.loop(), "guardián de caché")
         self._bg(self.updater.loop(), "actualizaciones")
         self._bg(self.captive.loop(), "portal cautivo")
         self.db.event("info", "sistema", "Bipon Net iniciado")
