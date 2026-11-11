@@ -19,6 +19,13 @@ export async function render(el, app) {
     ${d.fallback ? `<div class="alert warn mb">${ico("alert")}<div>Unbound no está disponible: se usa Cloudflare como respaldo temporal.</div></div>` : ""}
     <div class="grid g4 mb" id="dns-stats"></div>
 
+    <div class="card mb"><div class="opt" style="border:0;padding:0"><div class="t"><b>${ico("globe")} Preferir IPv4 sobre IPv6</b>
+      <span>Toda la red se conecta por IPv4 (Bipon deja de entregar direcciones IPv6 en sus respuestas). Actívalo si tu proveedor da IPv6 por túnel o con CGNAT y notas más ping, cortes o webs que tardan en abrir. Se aplica al instante; los equipos lo notan en 1-5 minutos (o al reconectar el Wi-Fi).</span></div>
+      ${toggle("prefer_ipv4", s.prefer_ipv4, 'id="v4pref"')}</div>
+      <div class="opt mt" style="padding:0;border:0"><div class="t"><b>${ico("shield")} Bloquear rastreadores camuflados (CNAME)</b>
+      <span>Algunos rastreadores se esconden bajo un subdominio de la propia web (metrics.tienda.com → rastreador). Bipon mira a dónde apunta de verdad y lo bloquea. Lo que permitas a mano se respeta.</span></div>
+      ${toggle("cname_check", s.cname_check !== false, 'id="cnamechk"')}</div></div>
+
     <div class="card mb">
       <header><h2>${ico("zap")}Optimizador de latencia</h2>
         <button class="btn" id="bench">${ico("activity")}Sólo medir</button><button class="btn primary" id="opt">${ico("zap")}Medir y aplicar el más rápido</button></header>
@@ -65,7 +72,7 @@ export async function render(el, app) {
 
     <div class="grid g2 mt">
       <div class="card"><header><h2>${ico("list")}Registros DNS locales</h2></header>
-        <p class="muted small mb">Nombres para tus equipos (ej. <code>nas.lan → 192.168.1.10</code>). NetPing responde además en <code>netping.lan</code>.</p>
+        <p class="muted small mb">Nombres para tus equipos (ej. <code>nas.lan → 192.168.1.10</code>). Bipon Net responde además en <code>bipon.lan</code>.</p>
         <div id="local-list" class="col"></div>
         <form class="inline-form mt" id="local-form"><input name="name" placeholder="nas.lan" required><select name="type" style="max-width:100px"><option>A</option><option>AAAA</option><option>CNAME</option></select><input name="value" placeholder="192.168.1.10" required><button class="btn">${ico("plus")}</button></form>
       </div>
@@ -79,6 +86,9 @@ export async function render(el, app) {
       </div>
     </div>`;
 
+  el.querySelector("#cnamechk").onchange = (e) => api.put("/dns", { cname_check: e.target.checked }).then(() => toast("Guardado")).catch(toastErr);
+  el.querySelector("#v4pref").onchange = (e) => api.put("/dns", { prefer_ipv4: e.target.checked })
+    .then(() => toast(e.target.checked ? "Preferencia IPv4 activada para toda la red" : "IPv4 e IPv6 normales de nuevo")).catch((err) => { e.target.checked = !e.target.checked; toastErr(err); });
   const save = (patch, msg = "Guardado") => api.put("/dns", patch).then(() => { toast(msg); }).catch(toastErr);
   el.querySelector("#auto-int").value = String(s.auto_optimize?.interval_hours || 24);
   const saveAuto = () => save({ auto_optimize: { ...(s.auto_optimize || {}), enabled: el.querySelector("#auto-on").checked, interval_hours: Number(el.querySelector("#auto-int").value) } }, "Optimización automática actualizada");

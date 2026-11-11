@@ -1,4 +1,4 @@
-# NetPing — despliegue con Docker Compose
+# Bipon Net — despliegue con Docker Compose
 #
 #   cp .env.example .env      # ajusta zona horaria y contraseña
 #   docker compose up -d --build
@@ -9,10 +9,10 @@
 #   docker compose --profile ddns up -d          # DNS dinámico con DuckDNS
 
 services:
-  netping:
+  bipon-net:
     build: .
-    image: netping:latest
-    container_name: netping
+    image: bipon-net:latest
+    container_name: bipon-net
     # Red del host: necesaria para ver los dispositivos de la LAN (ARP), servir DNS
     # en el puerto 53 de la IP real, Wake-on-LAN, UPnP y VPN.
     network_mode: host
@@ -25,10 +25,10 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       TZ: ${TZ:-UTC}
-      NETPING_PASSWORD: ${NETPING_PASSWORD:-}
-      NETPING_WEB_PORT: ${NETPING_WEB_PORT:-8080}
-      NETPING_DNS_PORT: ${NETPING_DNS_PORT:-53}
-      NETPING_LOG_LEVEL: ${NETPING_LOG_LEVEL:-INFO}
+      BIPON_PASSWORD: ${BIPON_PASSWORD:-}
+      BIPON_WEB_PORT: ${BIPON_WEB_PORT:-8080}
+      BIPON_DNS_PORT: ${BIPON_DNS_PORT:-53}
+      BIPON_LOG_LEVEL: ${BIPON_LOG_LEVEL:-INFO}
     volumes:
       - ./data:/data
     logging:
@@ -37,7 +37,7 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    container_name: netping-cloudflared
+    container_name: bipon-cloudflared
     profiles: ["cloudflared"]
     network_mode: host
     restart: unless-stopped
@@ -47,7 +47,7 @@ services:
 
   duckdns:
     image: lscr.io/linuxserver/duckdns:latest
-    container_name: netping-duckdns
+    container_name: bipon-duckdns
     profiles: ["ddns"]
     restart: unless-stopped
     environment:

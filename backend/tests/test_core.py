@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 from dnslib import QTYPE, RR, A, DNSRecord
 
-from netping.devices import schedule_active
-from netping.dns.cache import DNSCache
-from netping.dns.filter import (ST_LIST, ST_RULE, ST_SAFE, ST_SERVICE, ST_DEVICE, FilterEngine, Policy,
+from bipon.devices import schedule_active
+from bipon.dns.cache import DNSCache
+from bipon.dns.filter import (ST_LIST, ST_RULE, ST_SAFE, ST_SERVICE, ST_DEVICE, FilterEngine, Policy,
                                 parse_list_line)
-from netping.dns.upstream import Upstream
-from netping.unbound import render_config
-from netping.wireguard import generate
+from bipon.dns.upstream import Upstream
+from bipon.unbound import render_config
+from bipon.wireguard import generate
 
 
 # ------------------------------------------------------------------ listas
@@ -179,3 +179,23 @@ def test_wireguard_relay():
     assert "DNAT --to-destination 192.168.1.50:3074" in vps and "PersistentKeepalive" in r["files"][1]["content"]
     with pytest.raises(ValueError):
         generate({"mode": "home", "endpoint": "bad host; rm"})
+
+
+def test_cache_trim_and_usage():
+    c = DNSCache(size=10)
+    for i in range(10):
+        c.put(DNSCache.key(f"d{i}.com", QTYPE.A), _answer(f"d{i}.com"))
+    assert c.usage() == 100
+    freed = c.trim(70)
+    assert freed == 3 and c.usage() == 70 and DNSCache.key("d9.com", QTYPE.A) in c._d  # se conserva lo más reciente
+
+
+def test_parse_size():
+    from bipon.cacheguard import parse_size
+    assert parse_size("64m") == 64 * 1024 ** 2 and parse_size("1g") == 1024 ** 3 and parse_size("512k") == 512 * 1024
+
+
+def test_unbound_recommend_hardenings():
+    from bipon.unbound import recommend_config
+    c = recommend_config({}, 2, 2 * 1024 ** 3)["config"]
+    assert c["dnssec"] and c["qname_minimisation"] and c["edns_buffer_size"] == 1232 and c["num_threads"] == 2

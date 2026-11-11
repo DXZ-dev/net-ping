@@ -60,7 +60,7 @@ export async function render(el) {
   function lookup(b) {
     b.innerHTML = `<div class="card"><form class="inline-form mb" id="f"><input name="name" placeholder="dominio o IP" required>
       <select name="type" style="max-width:110px">${["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SOA", "PTR", "SRV", "CAA", "HTTPS", "DS", "DNSKEY"].map((t) => `<option>${t}</option>`).join("")}</select>
-      <select name="server" style="max-width:240px"><option value="">NetPing (con filtros)</option><option value="127.0.0.1:5335">Unbound</option><option>1.1.1.1</option><option>8.8.8.8</option><option>9.9.9.9</option><option value="https://1.1.1.1/dns-query">Cloudflare DoH</option><option value="tls://9.9.9.9#dns.quad9.net">Quad9 DoT</option></select>
+      <select name="server" style="max-width:240px"><option value="">Bipon Net (con filtros)</option><option value="127.0.0.1:5335">Unbound</option><option>1.1.1.1</option><option>8.8.8.8</option><option>9.9.9.9</option><option value="https://1.1.1.1/dns-query">Cloudflare DoH</option><option value="tls://9.9.9.9#dns.quad9.net">Quad9 DoT</option></select>
       <button class="btn primary">${ico("search")}Consultar</button></form><div id="out"></div></div>`;
     b.querySelector("#f").onsubmit = (e) => {
       e.preventDefault();
@@ -77,7 +77,7 @@ export async function render(el) {
 
   function bench(b) {
     b.innerHTML = `<div class="card"><header><h2>${ico("gauge")}Benchmark de servidores DNS</h2><button class="btn primary" id="go">${ico("play")}Ejecutar</button></header>
-      <p class="muted small">Compara NetPing (con caché), Unbound y los principales DNS públicos, incluidos cifrados (DoH/DoT) y familiares.</p>
+      <p class="muted small">Compara Bipon Net (con caché), Unbound y los principales DNS públicos, incluidos cifrados (DoH/DoT) y familiares.</p>
       <label class="field mt">Servidores extra (opcional, separados por espacio)<input id="extra" placeholder="192.168.1.1 tls://1.1.1.1#cloudflare-dns.com"></label><div id="out" class="mt"></div></div>`;
     b.querySelector("#go").onclick = (e) => busy(e.currentTarget, async () => {
       b.querySelector("#out").innerHTML = `<p class="muted">Midiendo… (15-30 s)</p>`;

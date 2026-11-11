@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 // Utilidades compartidas: API, formato, UI (toasts, modales, paneles), gráficos.
 
 export class ApiError extends Error {
@@ -12,7 +13,7 @@ export async function api(path, { method = "GET", body, raw = false } = {}) {
   }
   const res = await fetch(`/api${path}`, opts);
   if (res.status === 401 || res.status === 428) {
-    window.dispatchEvent(new CustomEvent("netping:auth", { detail: res.status }));
+    window.dispatchEvent(new CustomEvent("bipon:auth", { detail: res.status }));
   }
   if (!res.ok) {
     let msg = res.statusText;
@@ -59,8 +60,9 @@ export async function stream(path, onEvent, signal) {
 // ---------------------------------------------------------------- formato
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 export const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
-export const num = (n) => (n ?? 0).toLocaleString("es");
-export const pct = (n) => `${(n ?? 0).toLocaleString("es", { maximumFractionDigits: 1 })} %`;
+const LOC = () => (document.documentElement.lang === "en" ? "en-US" : "es");
+export const num = (n) => (n ?? 0).toLocaleString(LOC());
+export const pct = (n) => `${(n ?? 0).toLocaleString(LOC(), { maximumFractionDigits: 1 })} %`;
 export const ms = (n) => (n == null ? "—" : `${n < 10 ? n.toFixed(1) : Math.round(n)} ms`);
 export const mbps = (n) => (n == null ? "—" : `${n >= 100 ? Math.round(n) : n.toFixed(1)} Mbps`);
 export function bytes(b) {
@@ -84,8 +86,8 @@ export function duration(s) {
   if (h) return `${h} h ${m} min`;
   return `${m} min`;
 }
-export const time = (ts) => new Date(ts * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-export const datetime = (ts) => new Date(ts * 1000).toLocaleString("es", { dateStyle: "short", timeStyle: "short" });
+export const time = (ts) => new Date(ts * 1000).toLocaleTimeString(LOC(), { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+export const datetime = (ts) => new Date(ts * 1000).toLocaleString(LOC(), { dateStyle: "short", timeStyle: "short" });
 
 // ---------------------------------------------------------------- DOM
 export const $ = (sel, root = document) => root.querySelector(sel);
@@ -236,6 +238,8 @@ const P = {
   activity: "M3 12h4l3-8 4 16 3-8h4",
   settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
   check: "M5 12l5 5L20 7",
+  eye: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+  star: "M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9z",
   x: "M6 6l12 12M18 6 6 18",
   alert: "M12 9v4M12 17h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
   info: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16v-4M12 8h.01",
@@ -309,7 +313,7 @@ export function lineChart(canvas, { labels, series, yFmt = (v) => num(Math.round
     const n = labels.length;
     if (!n) {
       g.fillStyle = css("--muted"); g.font = "13px system-ui"; g.textAlign = "center";
-      g.fillText("Sin datos todavía", w / 2, H / 2); return;
+      g.fillText(t("Sin datos todavía"), w / 2, H / 2); return;
     }
     let maxY = 0;
     const stack = new Array(n).fill(0);

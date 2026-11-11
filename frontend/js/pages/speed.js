@@ -33,7 +33,7 @@ export async function render(el) {
     </div>
     <div id="lan" class="hidden">
       <div class="card">
-        <p class="muted">Mide la velocidad entre <b>este navegador</b> y el servidor NetPing. Útil para comprobar tu Wi-Fi, cables y switches. Ejecútalo desde el dispositivo que quieras medir.</p>
+        <p class="muted">Mide la velocidad entre <b>este navegador</b> y el servidor Bipon Net. Útil para comprobar tu Wi-Fi, cables y switches. Ejecútalo desde el dispositivo que quieras medir.</p>
         <div class="grid g3 mt">${m("lping", "Latencia LAN")}${m("ldown", "Descarga LAN")}${m("lup", "Subida LAN")}</div>
         <div class="center mt"><button class="btn primary lg" id="lgo">${ico("play")}Medir red local</button></div>
         <p class="muted small mt" id="lan-note"></p>
@@ -87,7 +87,7 @@ export async function render(el) {
     box.innerHTML = `<div class="row"><span class="grade grade-${cls}">${r.grade}</span>
       <div><div>Reposo: <b>${ms(r.idle_ping)}</b></div><div>Con carga: <b>${ms(r.loaded_ping)}</b></div><div>Aumento: <b class="${r.bufferbloat > 60 ? "err" : "ok"}">+${ms(r.bufferbloat)}</b></div></div></div>
       <p class="small mt">${esc(GRADE_TXT[r.grade])}</p>
-      ${["C", "D", "F"].includes(r.grade) ? `<div class="alert info mt">${ico("info")}<div class="small">Configura SQM/QoS en tu router limitando a <b>${Math.round(r.download * 0.92)} / ${Math.round(r.upload * 0.92)} Mbps</b>. Si NetPing es tu router, actívalo en <a href="#/gaming">Gaming → QoS</a>.</div></div>` : ""}`;
+      ${["C", "D", "F"].includes(r.grade) ? `<div class="alert info mt">${ico("info")}<div class="small">Configura SQM/QoS en tu router limitando a <b>${Math.round(r.download * 0.92)} / ${Math.round(r.upload * 0.92)} Mbps</b>. Si Bipon Net es tu router, actívalo en <a href="#/gaming">Gaming → QoS</a>.</div></div>` : ""}`;
   }
 
   async function history() {

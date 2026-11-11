@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Desinstala NetPing. Uso: sudo ./uninstall.sh [--purge]   (--purge borra también los datos)
+# Desinstala Bipon Net. Uso: sudo bash uninstall.sh [--purge]   (--purge borra también los datos)
 set -euo pipefail
 [[ $EUID -eq 0 ]] || { echo "Ejecuta como root."; exit 1; }
-systemctl disable --now netping 2>/dev/null || true
-rm -f /etc/systemd/system/netping.service
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+systemctl disable --now bipon-net 2>/dev/null || true
+rm -f /etc/systemd/system/bipon-net.service
 systemctl daemon-reload
-rm -rf /opt/netping
 if [[ "${1:-}" == "--purge" ]]; then
-  rm -rf /var/lib/netping /etc/netping.env /etc/sysctl.d/99-netping.conf
+  rm -rf /var/lib/bipon-net /etc/bipon-net.env /etc/sysctl.d/99-bipon-net.conf
   echo "Datos eliminados."
 fi
-bash "$(dirname "$0")/free-port-53.sh" --undo 2>/dev/null || true
-echo "NetPing desinstalado."
+bash "$HERE/free-port-53.sh" --undo 2>/dev/null || true
+rm -rf /opt/bipon-net/venv
+[[ "$HERE" == /opt/bipon-net/src/* ]] || rm -rf /opt/bipon-net
+echo "Bipon Net desinstalado."

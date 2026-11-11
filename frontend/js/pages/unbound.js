@@ -1,4 +1,4 @@
-import { api, esc, ico, num, pct, duration, bytes, toast, toastErr, busy, toggle, help, modal, $ } from "../lib.js";
+import { api, esc, ico, num, pct, duration, bytes, ago, toast, toastErr, busy, toggle, help, modal, $ } from "../lib.js";
 
 export const title = "Unbound";
 export const subtitle = "Resolutor DNS recursivo propio: privacidad total y validación DNSSEC";
@@ -7,7 +7,7 @@ export async function render(el, app) {
   const d = await api.get("/unbound");
   const st = d.status, s = d.settings, x = d.stats || {};
   if (!st.available) {
-    el.innerHTML = `<div class="alert warn">${ico("alert")}<div><b>Unbound no está instalado</b><p class="small">La imagen Docker y el instalador lo incluyen. En una instalación manual: <code>apt install unbound</code> y reinicia NetPing.</p></div></div>`;
+    el.innerHTML = `<div class="alert warn">${ico("alert")}<div><b>Unbound no está instalado</b><p class="small">La imagen Docker y el instalador lo incluyen. En una instalación manual: <code>apt install unbound</code> y reinicia Bipon Net.</p></div></div>`;
     return;
   }
   el.innerHTML = `
@@ -57,6 +57,13 @@ export async function render(el, app) {
           <button class="btn primary">${ico("check")}Validar y aplicar</button></div>
       </form>
       <div class="col">
+        <div class="card" id="cg"></div>
+        <div class="card" id="ub-auto"><header><h3>${ico("globe")}Autoconfiguración por ubicación</h3></header>
+          <p class="small muted mb">Mide desde tu red los DNS cifrados más cercanos (anycast), elige los 2 más rápidos y fiables y ajusta hilos y caché a este equipo. Después, las respuestas salen de la caché local de Unbound en menos de 1 ms.</p>
+          <button class="btn primary" id="ub-geo">${ico("zap")}Autoconfigurar ahora</button>
+          <div class="opt mt"><div class="t"><b>Reajustar cada día</b><span>Si tu proveedor cambia la ruta, Unbound se adapta solo.</span></div>${toggle("ub-daily", false)}</div>
+          <div id="ub-geo-out" class="mt"></div>
+          <details class="mt small"><summary>Sólo ajustar al hardware</summary><button class="btn sm mt" id="opt-ub">${ico("server")}Optimizar para mi hardware</button></details></div>
         <div class="card"><header><h3>${ico("power")}Acciones</h3></header>
           <div class="col">
             <button class="btn" data-a="restart">${ico("refresh")}Reiniciar Unbound</button>
@@ -71,6 +78,18 @@ export async function render(el, app) {
       </div>
     </div>`;
 
+  drawGuard(el.querySelector("#cg"));
+  drawAuto(el.querySelector("#ub-auto"), app);
+  el.querySelector("#opt-ub").onclick = async (e) => {
+    const r = await api.get("/unbound/recommend").catch(() => null);
+    if (!r) return;
+    const rows = Object.entries(r.changes).map(([k, v]) => `<tr><td class="mono small">${esc(k)}</td><td class="small muted">${esc(String(v.from))}</td><td class="small">→ ${esc(String(v.to))}</td></tr>`).join("");
+    modal({ title: "Optimizar Unbound", wide: true,
+      body: `<p class="small muted">Hardware detectado: ${r.hardware.cpus} CPU · ${bytes(r.hardware.mem_total)} RAM.</p>
+        <ul class="small">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+        ${rows ? `<h4 class="mt mb">Cambios</h4><div class="table-wrap"><table><tbody>${rows}</tbody></table></div>` : `<p class="small">Ya tienes la configuración óptima.</p>`}`,
+      actions: [{ label: "Cancelar" }, { label: "Aplicar", kind: "primary", onClick: async () => { await api.post("/unbound/optimize"); toast("Unbound optimizado"); setTimeout(() => app.reload(), 1200); } }] });
+  };
   const f = el.querySelector("#uf");
   f.querySelectorAll("[name=mode]").forEach((r) => r.onchange = () => el.querySelector("#fwd").classList.toggle("hidden", r.value === "recursive" && r.checked));
   f.querySelectorAll("[data-fwd]").forEach((b) => b.onclick = () => { f.forward_servers.value = b.dataset.fwd.split(" ").join("\n"); });
@@ -92,3 +111,46 @@ export async function render(el, app) {
 }
 
 const stat = (l, v, sub, tint, icon) => `<div class="card stat"><div class="ic tint-${tint}">${ico(icon)}</div><div class="truncate"><div class="v">${esc(v)}</div><div class="l">${esc(l)} · <span class="small">${esc(sub)}</span></div></div></div>`;
+
+// Guardián de caché: limpieza automática al llegar al umbral (90 % por defecto)
+async function drawGuard(box) {
+  if (!box) return;
+  const g = await api.get("/cacheguard").catch(() => null);
+  if (!g) { box.remove(); return; }
+  const u = g.last?.unbound, bp = g.last?.bipon ?? 0, thr = g.config.threshold;
+  const bar = (label, v, sub = "") => `<div class="mb"><div class="row between small"><span>${label}</span><b>${v == null ? "—" : v + " %"}</b></div>
+    <div class="progress" style="height:8px"><i style="width:${Math.min(100, v || 0)}%;background:${(v || 0) >= thr ? "var(--err)" : (v || 0) >= thr - 15 ? "var(--warn)" : "var(--ok)"}"></i></div>${sub ? `<div class="small muted">${sub}</div>` : ""}</div>`;
+  box.innerHTML = `<header><h3>${ico("shield")}Guardián de caché</h3></header>
+    <p class="small muted mb">Cuando una caché llega al umbral se limpia sola (primero lo inútil, después todo si hace falta) y se vuelve a precalentar el DNS de juegos y streaming, para que nunca se sature.</p>
+    ${bar("Unbound", u ? u.pct : null, u ? `mensajes ${bytes(u.msg_bytes)} / ${bytes(u.msg_max)} · registros ${bytes(u.rrset_bytes)} / ${bytes(u.rrset_max)}` : "Unbound no está activo")}
+    ${bar("Caché de Bipon", bp)}
+    <div class="opt"><div class="t"><b>Limpieza automática</b><span>Comprueba cada minuto</span></div>${toggle("cg-on", g.config.enabled)}</div>
+    <label class="field mt">Umbral (%)<input type="number" id="cg-thr" min="50" max="99" value="${thr}"></label>
+    <div class="row mt"><button class="btn sm" id="cg-save">${ico("check")}Guardar</button><button class="btn sm" id="cg-now">${ico("trash")}Limpiar ahora</button></div>
+    ${g.history.length ? `<h4 class="mt mb">Últimas limpiezas</h4>${g.history.slice(0, 5).map((h) => `<div class="small row between"><span>${esc(h.cache)} · ${esc(h.detail)}</span><span class="muted nowrap">${h.before}% → ${h.after}% · ${ago(h.ts)}</span></div>`).join("")}` : ""}`;
+  box.querySelector("#cg-save").onclick = (e) => busy(e.currentTarget, () => api.put("/cacheguard", { enabled: box.querySelector("[name=cg-on]").checked, threshold: Number(box.querySelector("#cg-thr").value) }))
+    .then(() => { toast("Guardado"); drawGuard(box); }).catch(() => {});
+  box.querySelector("#cg-now").onclick = (e) => busy(e.currentTarget, () => api.post("/cacheguard/clean")).then(() => { toast("Cachés limpiadas y DNS de juegos precalentado"); drawGuard(box); }).catch(() => {});
+}
+
+// Autoconfiguración por ubicación: DNS más cercanos + hardware, con la tabla de mediciones
+async function drawAuto(box, app) {
+  if (!box) return;
+  const out = box.querySelector("#ub-geo-out");
+  const show = (a) => {
+    box.querySelector("[name=ub-daily]").checked = !!a.enabled;
+    const l = a.last;
+    if (!l) { out.innerHTML = `<p class="small muted">Aún no se ha ejecutado.</p>`; return; }
+    const rows = (l.dot || []).filter((r) => r.median != null).slice(0, 8);
+    out.innerHTML = `<div class="alert ${l.applied ? "ok" : "info"} small">${ico(l.applied ? "check" : "info")}<div><b>${esc(l.reason || "")}</b><br><span class="muted">${ago(l.ts)}</span></div></div>
+      ${rows.length ? `<div class="table-wrap mt"><table><thead><tr><th>Proveedor</th><th>IP</th><th class="right">Con caché</th><th class="right">En frío</th><th class="right">Fiabilidad</th></tr></thead><tbody>
+        ${rows.map((r) => `<tr${(l.chosen || []).includes(r.provider) ? ' style="font-weight:600"' : ""}><td>${esc(r.name)}</td><td class="mono small">${esc(r.ip)}</td><td class="right">${r.median} ms</td><td class="right">${r.cold ?? "—"} ms</td><td class="right">${r.reliability} %</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+  };
+  show(await api.get("/unbound/auto").catch(() => ({})));
+  box.querySelector("#ub-geo").onclick = (e) => busy(e.currentTarget, async () => {
+    out.innerHTML = `<p class="small muted">Midiendo los DNS más cercanos desde tu ubicación… (≈10-20 s)</p>`;
+    const r = await api.post("/unbound/auto", { run: true, apply: true, enabled: box.querySelector("[name=ub-daily]").checked });
+    show(r); toast("Unbound autoconfigurado"); setTimeout(() => app.reload(), 1500);
+  }).catch(() => {});
+  box.querySelector("[name=ub-daily]").onchange = (e) => api.post("/unbound/auto", { run: false, enabled: e.target.checked }).then(() => toast("Guardado")).catch(() => {});
+}

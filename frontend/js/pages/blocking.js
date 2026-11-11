@@ -1,4 +1,6 @@
 import { api, esc, ico, num, ago, toast, toastErr, busy, modal, on, toggle, confirmDialog, empty, fresh, $, $$ } from "../lib.js";
+import { t } from "../i18n.js";
+import { appIcon } from "../brands.js";
 
 export const title = "Bloqueo";
 export const subtitle = "Listas de bloqueo, reglas propias y aplicaciones";
@@ -8,11 +10,12 @@ const KIND = { allow: ["Permitir", "ok"], deny: ["Bloquear", "err"], regex_allow
 
 export async function render(el) {
   let tab = "lists";
-  el.innerHTML = `<div class="tabs">
+  el.innerHTML = `<div id="sugg"></div><div class="tabs">
       <button data-tab="lists" class="active">${ico("list")}Listas</button><button data-tab="rules">${ico("edit")}Reglas propias</button>
       <button data-tab="apps">${ico("devices")}Aplicaciones</button><button data-tab="check">${ico("search")}Comprobar dominio</button></div>
     <div id="pane"></div>`;
   let pane = el.querySelector("#pane");
+  drawSuggestions(el.querySelector("#sugg"));
   on(el, "click", "[data-tab]", (e, b) => { tab = b.dataset.tab; $$("[data-tab]", el).forEach((x) => x.classList.toggle("active", x === b)); show(); });
 
   async function show() {
@@ -107,7 +110,7 @@ export async function render(el) {
     pane = fresh(pane);
     const blocked = new Set(services.filter((s) => s.blocked).map((s) => s.id));
     const cats = [...new Set(services.map((s) => s.category))];
-    const letter = (s) => `<span class="letter" style="background:hsl(${[...s.id].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 45%)">${esc(s.name[0])}</span>`;
+    const letter = (s) => appIcon(s.id, s.name);
     pane.innerHTML = `<div class="card"><header><h2>Bloquear aplicaciones en toda la red</h2><span class="badge err" id="cnt">${blocked.size} bloqueadas</span></header>
       <p class="muted small mb">Para bloquear apps sólo en algunos dispositivos (p. ej. los de los niños) usa <a href="#/parental">Control parental</a>.</p>
       ${cats.map((c) => `<h4 class="mb mt">${esc(c)}</h4><div class="svc-grid">${services.filter((s) => s.category === c).map((s) =>
@@ -154,4 +157,18 @@ export async function render(el) {
   }
 
   show();
+}
+
+// «¿Algo dejó de funcionar?»: dominios bloqueados que una app reintenta sin parar
+async function drawSuggestions(box) {
+  const rows = await api.get("/blocking/suggestions").catch(() => []);
+  if (!rows.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="card mb"><header><h3>${ico("alert")}${t("¿Algo dejó de funcionar?")}</h3></header>
+    <p class="muted small mb">${t("Estos dominios bloqueados se están reintentando muchas veces: suele ser una app o web que no funciona sin ellos. Si algo falla, permítelo; si no, descártalo.")}</p>
+    <div class="col">${rows.map((r) => `<div class="row between rec" data-row="${esc(r.domain)}"><span class="grow truncate"><b class="mono">${esc(r.domain)}</b>
+        <div class="small muted">${r.known ? esc(t(r.known)) + " · " : ""}${r.retries} ${t("reintentos")} · ${esc(r.devices.join(", "))}</div></span>
+      <button class="btn sm success" data-sallow="${esc(r.domain)}">${ico("check")}${t("Permitir")}</button><button class="btn sm ghost" data-sdis="${esc(r.domain)}">${t("Descartar")}</button></div>`).join("")}</div></div>`;
+  const gone = (d) => { box.querySelector(`[data-row="${CSS.escape(d)}"]`)?.remove(); if (!box.querySelector("[data-row]")) box.innerHTML = ""; };
+  box.querySelectorAll("[data-sallow]").forEach((b) => b.onclick = () => busy(b, () => api.post("/rules", { kind: "allow", value: b.dataset.sallow })).then(() => { toast(`${b.dataset.sallow} ${t("permitido")}`); gone(b.dataset.sallow); }).catch(() => {}));
+  box.querySelectorAll("[data-sdis]").forEach((b) => b.onclick = () => api.post("/blocking/suggestions/dismiss", { domain: b.dataset.sdis }).then(() => gone(b.dataset.sdis)).catch(() => {}));
 }
