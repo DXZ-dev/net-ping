@@ -9,6 +9,8 @@ const fmtRate = (bps) => bps == null ? "" : bps >= 1e6 ? `${(bps / 1e6).toFixed(
 
 export async function render(el) {
   let view = localStorage.getItem("np-dev-view") || "map";
+  let userView = null;      // vista del mapa movida/ampliada por el usuario (se conserva en las actualizaciones en vivo)
+  let dragged = false;      // para no abrir un dispositivo al soltar tras arrastrar
   let data = { devices: [] };
   let profiles = [];
   let filter = "";
@@ -32,7 +34,7 @@ export async function render(el) {
     toast(r.found != null ? `${t("Análisis completado")}: ${r.found} ${t("en línea")}` : t("Análisis en curso…"));
     await load();
   }).catch(() => {});
-  on(el, "click", "[data-mac]", (e, n) => { if (!e.target.closest("button")) openDevice(n.dataset.mac); });
+  on(el, "click", "[data-mac]", (e, n) => { if (dragged) return; if (!e.target.closest("button")) openDevice(n.dataset.mac).catch(toastErr); });
 
   async function load() {
     [data, profiles] = await Promise.all([api.get("/devices"), api.get("/profiles")]);
@@ -130,7 +132,9 @@ export async function render(el) {
 
   // ---------------------------------------------------------------- mapa jerárquico
   function drawMap(box, ds) {
-    box.innerHTML = `<div class="netmap"><svg id="map"></svg></div><p class="muted small mt">${t("Haz clic en un dispositivo para ver su actividad, controlar su Internet, limitar su velocidad o ver sus puertos. Las máquinas virtuales se agrupan alrededor de su servidor.")}</p>`;
+    box.innerHTML = `<div class="netmap"><svg id="map"></svg>
+        <div class="map-tools"><button type="button" class="icon-btn" data-z="in" title="${t("Acercar")}">+</button><button type="button" class="icon-btn" data-z="out" title="${t("Alejar")}">−</button><button type="button" class="icon-btn" data-z="fit" title="${t("Ajustar a la pantalla")}">⤢</button></div></div>
+      <p class="muted small mt">${t("Haz clic en un dispositivo para ver su actividad, controlar su Internet, limitar su velocidad o ver sus puertos. Las máquinas virtuales se agrupan alrededor de su servidor.")} ${t("Mantén pulsado y arrastra para mover el mapa; usa + / − (o Ctrl + rueda, o pellizca en el móvil) para el zoom.")}</p>`;
     const svg = box.querySelector("#map");
     const W = svg.clientWidth || 900, H = svg.clientHeight || 560;
     const wide = W > H * 1.2;
@@ -198,9 +202,10 @@ export async function render(el) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const o of items) { const b = boxOf(o); minX = Math.min(minX, b.cx - b.w / 2); maxX = Math.max(maxX, b.cx + b.w / 2); minY = Math.min(minY, b.cy - b.h / 2); maxY = Math.max(maxY, b.cy + b.h / 2); }
     const pad = 20, bw = maxX - minX + pad * 2, bh = maxY - minY + pad * 2;
-    svg.setAttribute("viewBox", `${minX - pad} ${minY - pad} ${bw} ${bh}`);
+    const fit = { x: minX - pad, y: minY - pad, w: bw, h: bh };
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    svg.style.height = `${Math.round(Math.max(H, Math.min(1400, (bh * W) / bw)))}px`;
+    svg.style.height = `${Math.round(Math.max(H, Math.min(900, (bh * W) / bw)))}px`;
+    enablePanZoom(svg, box, fit);
     const inet = items[1];
     let links = `<line class="link on" x1="0" y1="${inet.y + 20}" x2="0" y2="-32"/>`;
     let nodes = `<g class="node" transform="translate(${inet.x},${inet.y})"><circle class="bg" r="20"/><g transform="translate(-9,-9) scale(.75)"><path class="icon" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></g><text y="34">Internet</text></g>`;
@@ -211,6 +216,70 @@ export async function render(el) {
     for (const o of items.slice(2)) nodes += node(o.d, o.x, o.y, o.r, !!o.small);
     nodes += gw ? node(gw, center.x, center.y, 30) : `<g class="node" transform="translate(0,0)"><circle class="bg" r="30"/><text y="48">${t("Router")}</text></g>`;
     svg.innerHTML = links + nodes;
+  }
+
+  // ---------------------------------------------------------------- mover y ampliar el mapa
+  function enablePanZoom(svg, box, fit) {
+    let vb = userView ? { ...userView } : { ...fit };
+    const set = () => svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+    set();
+    const zoom = (f, cx, cy) => {
+      const nw = Math.min(fit.w * 4, Math.max(fit.w / 6, vb.w * f));
+      const k = nw / vb.w;
+      cx ??= vb.x + vb.w / 2; cy ??= vb.y + vb.h / 2;
+      vb = { x: cx - (cx - vb.x) * k, y: cy - (cy - vb.y) * k, w: nw, h: vb.h * k };
+      userView = { ...vb }; set();
+    };
+    const toSvg = (clientX, clientY) => {
+      const r = svg.getBoundingClientRect();
+      const scale = Math.max(vb.w / r.width, vb.h / r.height);  // «meet»: misma escala en ambos ejes
+      const ox = (r.width * scale - vb.w) / 2, oy = (r.height * scale - vb.h) / 2;
+      return { x: vb.x - ox + (clientX - r.left) * scale, y: vb.y - oy + (clientY - r.top) * scale, scale };
+    };
+    box.querySelectorAll("[data-z]").forEach((b) => b.onclick = () => {
+      if (b.dataset.z === "fit") { vb = { ...fit }; userView = null; set(); } else zoom(b.dataset.z === "in" ? 0.8 : 1.25);
+    });
+    svg.addEventListener("wheel", (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;  // la rueda sola sigue desplazando la página
+      e.preventDefault();
+      const p = toSvg(e.clientX, e.clientY);
+      zoom(e.deltaY < 0 ? 0.88 : 1.14, p.x, p.y);
+    }, { passive: false });
+    const pts = new Map();
+    let start = null, pinch = null;
+    svg.addEventListener("pointerdown", (e) => {
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      dragged = false;
+      if (pts.size === 1) start = { x: e.clientX, y: e.clientY, vb: { ...vb }, scale: toSvg(e.clientX, e.clientY).scale };
+      if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), w: vb.w }; }
+    });
+    svg.addEventListener("pointermove", (e) => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2 && pinch) {
+        const [a, b] = [...pts.values()];
+        const d = Math.hypot(a.x - b.x, a.y - b.y);
+        const c = toSvg((a.x + b.x) / 2, (a.y + b.y) / 2);
+        zoom((pinch.w * (pinch.d / Math.max(d, 1))) / vb.w, c.x, c.y);
+        dragged = true;
+        return;
+      }
+      if (!start) return;
+      const dx = e.clientX - start.x, dy = e.clientY - start.y;
+      if (!dragged && Math.hypot(dx, dy) < 5) return;
+      if (!dragged) { try { svg.setPointerCapture(e.pointerId); } catch {} }  // se captura sólo al empezar a arrastrar (el clic en un nodo sigue funcionando)
+      dragged = true;
+      svg.classList.add("grabbing");
+      vb = { ...start.vb, x: start.vb.x - dx * start.scale, y: start.vb.y - dy * start.scale };
+      userView = { ...vb }; set();
+    });
+    const end = (e) => {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinch = null;
+      if (!pts.size) { start = null; svg.classList.remove("grabbing"); setTimeout(() => { dragged = false; }, 0); }
+    };
+    svg.addEventListener("pointerup", end);
+    svg.addEventListener("pointercancel", end);
   }
 
   function node(d, x, y, r, small = false) {

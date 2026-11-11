@@ -3,6 +3,7 @@ import { t } from "../i18n.js";
 import { loadPrefs, savePrefs } from "../theme.js";
 import { brandIcon } from "../brands.js";
 
+import { openDetail } from "./dash-details.js";
 export const title = "Panel";
 export const subtitle = "Resumen en tiempo real de tu red";
 
@@ -214,6 +215,12 @@ export async function render(el, app) {
     if (sp) api.get("/speedtest/history?limit=1").then((r) => { if (r[0]) sp.querySelector(".v").textContent = `${mbps(r[0].download)}`; sp.querySelector(".l").textContent = r[0] ? `${t("Última velocidad")} · ↑${mbps(r[0].upload)} · ${ms(r[0].ping)}` : t("Sin tests"); }).catch(() => {});
   }
 
+  // clic en una tarjeta de cifras → su detalle propio
+  on(dash, "click", ".w .card.stat", (e, card) => {
+    if (editing || e.target.closest("a,button")) return;
+    const id = card.closest(".w")?.dataset.id;
+    if (id) openDetail(id, data, hours).catch(toastErr);
+  });
   on(dash, "click", "[data-block]", async (e, b) => { e.preventDefault(); try { await api.post("/rules", { kind: "deny", value: b.dataset.block }); toast(`${b.dataset.block} ${t("bloqueado")}`); load(); } catch (err) { toastErr(err); } });
   on(dash, "click", "[data-allow]", async (e, b) => { e.preventDefault(); try { await api.post("/rules", { kind: "allow", value: b.dataset.allow }); toast(`${b.dataset.allow} ${t("permitido")}`); load(); } catch (err) { toastErr(err); } });
   on(dash, "click", "[data-q]", async (e, b) => {

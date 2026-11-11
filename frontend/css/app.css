@@ -489,3 +489,17 @@ a.brand:hover { opacity: .85; }
   .app.nav-open .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 89; background: rgba(2,6,23,.5); backdrop-filter: blur(2px); }
   .sidebar { padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
 }
+
+/* tarjetas del panel con detalle al hacer clic */
+.dash .w .card.stat { cursor: pointer; transition: transform .15s, box-shadow .15s, border-color .15s; position: relative; }
+.dash .w .card.stat:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.dash .w .card.stat::after { content: "›"; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 20px; color: var(--muted); opacity: 0; transition: .15s; }
+.dash .w .card.stat:hover::after { opacity: .8; }
+.dash.editing .w .card.stat { cursor: grab; transform: none; }
+
+/* mapa: mover y ampliar */
+.netmap svg { cursor: grab; touch-action: none; user-select: none; }
+.netmap svg.grabbing { cursor: grabbing; }
+.netmap svg.grabbing .node { pointer-events: none; }
+.map-tools { position: absolute; right: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; z-index: 2; }
+.map-tools .icon-btn { width: 34px; height: 34px; font-size: 18px; font-weight: 600; background: var(--card); border: 1px solid var(--border); backdrop-filter: var(--glass-blur); }
