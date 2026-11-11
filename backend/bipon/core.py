@@ -195,11 +195,14 @@ class Context:
         if t.get("enabled", True) and t.get("dot", True):
             try:
                 tls.generate_self_signed()
-                await self.dns.start_dot(int(t.get("dot_port", 853)), tls.server_context())
+                dot_ctx = tls.server_context()
+                tls.register_context(dot_ctx)  # se recarga en caliente al renovar el certificado
+                await self.dns.start_dot(int(t.get("dot_port", 853)), dot_ctx)
             except Exception as exc:
                 log.warning("DNS-over-TLS no disponible: %s", exc)
         self._bg(self._flush_loop(), "flush")
         self._bg(self._maintenance_loop(), "mantenimiento")
+        self._bg(self._cert_loop(), "certificados")
         self._bg(self._blocking_loop(), "bloqueo")
         self._bg(self.lists.scheduler(), "listas")
         self._bg(self.devices.scheduler(), "dispositivos")
@@ -245,6 +248,22 @@ class Context:
                     pass
             except Exception:  # pragma: no cover
                 log.exception("no se pudo guardar el registro de consultas")
+
+    async def _cert_loop(self) -> None:
+        """Renueva solo el certificado del panel firmado por la CA local (caducidad o IP nueva)."""
+        await asyncio.sleep(60)
+        while True:
+            try:
+                extra = (self.settings.get("tls") or {}).get("extra_names") or []
+                if tls.needs_renewal(extra):
+                    tls.issue_bipon(extra)
+                    self.db.event("info", "seguridad", "Certificado HTTPS del panel renovado por la CA local")
+                for c in tls.issued():
+                    if c["days_left"] < 30 and not c.get("warned"):
+                        self.db.event("warning", "seguridad", f"El certificado «{c['label']}» caduca en {c['days_left']} días: renuévalo en Usuarios y acceso")
+            except Exception as exc:  # pragma: no cover
+                log.warning("certificados: %s", exc)
+            await asyncio.sleep(6 * 3600)
 
     async def _maintenance_loop(self):
         while True:

@@ -133,29 +133,83 @@ export async function render(el) {
     box.innerHTML = `<div class="netmap"><svg id="map"></svg></div><p class="muted small mt">${t("Haz clic en un dispositivo para ver su actividad, controlar su Internet, limitar su velocidad o ver sus puertos. Las máquinas virtuales se agrupan alrededor de su servidor.")}</p>`;
     const svg = box.querySelector("#map");
     const W = svg.clientWidth || 900, H = svg.clientHeight || 560;
-    const cx = W / 2, cy = H / 2 + 10;
+    const wide = W > H * 1.2;
     const gw = ds.find((d) => d.is_gateway);
     const top = ds.filter((d) => d !== gw && (!d.parent_effective || !ds.some((x) => x.mac === d.parent_effective)));
-    let links = `<line class="link on" x1="${cx}" y1="62" x2="${cx}" y2="${cy - 32}"/>`;
-    let nodes = `<g class="node" transform="translate(${cx},${40})"><circle class="bg" r="20"/><g transform="translate(-9,-9) scale(.75)"><path class="icon" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></g><text y="34">Internet</text></g>`;
-    const R = Math.min(W, H) * 0.34;
-    const sx = W > H ? 1.45 : 1;
+    const n = Math.max(top.length, 1);
+
+    // --- 1) posiciones iniciales: anillo alrededor del router (hueco arriba para «Internet») y VMs hacia fuera de su servidor
+    const labelW = (d, small) => Math.max(Math.min(20, dname(d).length) * (small ? 6 : 6.6),
+      small ? 0 : ((d.ip || "").length + (d.latency != null ? 10 : 0)) * 5.6) + 14;
+    const items = [];
+    const add = (o) => { o.w = Math.max(o.r * 2 + 10, o.lw); o.h = o.r * 2 + (o.small ? 24 : 40); items.push(o); return o; };
+    const kidsTotal = top.reduce((a, d) => a + childrenOf(d.mac).filter((k) => ds.includes(k)).length, 0);
+    const R = Math.max(190, ((n + kidsTotal * 0.35) * 135) / (2 * Math.PI));
+    const sx = wide ? 1.4 : 1;
+    const gap = (70 * Math.PI) / 180;
+    const center = add({ fixed: true, x: 0, y: 0, r: 30, lw: 90, d: gw });
+    add({ fixed: true, x: 0, y: -Math.max(110, R * 0.62), r: 20, lw: 70, internet: true });
     top.forEach((d, i) => {
-      const a = (i / top.length) * Math.PI * 2 + Math.PI / 2 + 0.25;
-      const x = cx + Math.cos(a) * R * sx, y = cy + Math.sin(a) * R;
-      links += `<line class="link ${d.internet_blocked ? "blocked" : d.online ? "on" : ""}" x1="${cx}" y1="${cy}" x2="${x}" y2="${y}"/>`;
+      const a = -Math.PI / 2 + gap / 2 + ((i + 0.5) / n) * (Math.PI * 2 - gap);
       const kids = childrenOf(d.mac).filter((k) => ds.includes(k));
+      const p = add({ d, x: Math.cos(a) * R * sx, y: Math.sin(a) * R, r: kids.length ? 24 : 21, lw: labelW(d), a });
+      p.ax = p.x; p.ay = p.y;
+      const perRow = 5;
       kids.forEach((k, j) => {
-        const spread = Math.min(Math.PI * 0.9, 0.45 * kids.length);
-        const ka = a + (kids.length === 1 ? 0 : -spread / 2 + (j / (kids.length - 1)) * spread);
-        const rr = 74 + (j % 2) * 14;
-        const kx = x + Math.cos(ka) * rr * (W > H ? 1.2 : 1), ky = y + Math.sin(ka) * rr;
-        links += `<line class="link ${k.online ? "on" : ""}" x1="${x}" y1="${y}" x2="${kx}" y2="${ky}" style="stroke-dasharray:3 4"/>`;
-        nodes += node(k, kx, ky, 15, true);
+        const row = Math.floor(j / perRow), inRow = Math.min(perRow, kids.length - row * perRow), col = j % perRow;
+        const rr = 120 + row * 80;
+        const spread = inRow === 1 ? 0 : Math.min(Math.PI * 0.95, ((inRow - 1) * 105) / rr);
+        const ka = a + (inRow === 1 ? 0 : -spread / 2 + (col / (inRow - 1)) * spread);
+        const c = add({ d: k, parent: p, small: true, x: p.x + Math.cos(ka) * rr, y: p.y + Math.sin(ka) * rr, r: 16, lw: labelW(k, true) });
+        c.ax = c.x; c.ay = c.y;
       });
-      nodes += node(d, x, y, kids.length ? 24 : 21);
     });
-    nodes += gw ? node(gw, cx, cy, 30) : `<g class="node" transform="translate(${cx},${cy})"><circle class="bg" r="30"/><text y="48">${t("Router")}</text></g>`;
+
+    // --- 2) relajación: separa cualquier par cuyas cajas (icono + etiqueta) se solapen
+    const boxOf = (o) => ({ cx: o.x, cy: o.y + (o.h / 2 - o.r - 4), w: o.w + 8, h: o.h + 6 });
+    for (let it = 0; it < 260; it++) {
+      let moved = false;
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          const A = items[i], B = items[j];
+          if (A.fixed && B.fixed) continue;
+          const a = boxOf(A), b = boxOf(B);
+          const ox = (a.w + b.w) / 2 - Math.abs(a.cx - b.cx), oy = (a.h + b.h) / 2 - Math.abs(a.cy - b.cy);
+          if (ox <= 0 || oy <= 0) continue;
+          moved = true;
+          let dx = b.cx - a.cx, dy = b.cy - a.cy;
+          if (!dx && !dy) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; }
+          const len = Math.hypot(dx, dy);
+          const push = Math.min(ox, oy) / 2 + 1;
+          const ux = (dx / len) * push, uy = (dy / len) * push;
+          const wa = A.fixed ? 0 : B.fixed ? 2 : 1, wb = B.fixed ? 0 : A.fixed ? 2 : 1;
+          A.x -= ux * wa; A.y -= uy * wa; B.x += ux * wb; B.y += uy * wb;
+        }
+      }
+      for (const o of items) if (!o.fixed && o.ax != null) {  // muelle suave hacia su sitio ideal
+        const k = o.parent ? 0.03 : 0.015;
+        const tx = o.parent ? o.parent.x + (o.ax - o.parent.ax) : o.ax, ty = o.parent ? o.parent.y + (o.ay - o.parent.ay) : o.ay;
+        o.x += (tx - o.x) * k; o.y += (ty - o.y) * k;
+      }
+      if (!moved && it > 20) break;
+    }
+
+    // --- 3) dibujo con el lienzo ajustado al contenido (nada queda fuera ni encima)
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const o of items) { const b = boxOf(o); minX = Math.min(minX, b.cx - b.w / 2); maxX = Math.max(maxX, b.cx + b.w / 2); minY = Math.min(minY, b.cy - b.h / 2); maxY = Math.max(maxY, b.cy + b.h / 2); }
+    const pad = 20, bw = maxX - minX + pad * 2, bh = maxY - minY + pad * 2;
+    svg.setAttribute("viewBox", `${minX - pad} ${minY - pad} ${bw} ${bh}`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.style.height = `${Math.round(Math.max(H, Math.min(1400, (bh * W) / bw)))}px`;
+    const inet = items[1];
+    let links = `<line class="link on" x1="0" y1="${inet.y + 20}" x2="0" y2="-32"/>`;
+    let nodes = `<g class="node" transform="translate(${inet.x},${inet.y})"><circle class="bg" r="20"/><g transform="translate(-9,-9) scale(.75)"><path class="icon" d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></g><text y="34">Internet</text></g>`;
+    for (const o of items.slice(2)) {
+      if (o.parent) links += `<line class="link ${o.d.online ? "on" : ""}" x1="${o.parent.x}" y1="${o.parent.y}" x2="${o.x}" y2="${o.y}" style="stroke-dasharray:3 4"/>`;
+      else links += `<line class="link ${o.d.internet_blocked ? "blocked" : o.d.online ? "on" : ""}" x1="0" y1="0" x2="${o.x}" y2="${o.y}"/>`;
+    }
+    for (const o of items.slice(2)) nodes += node(o.d, o.x, o.y, o.r, !!o.small);
+    nodes += gw ? node(gw, center.x, center.y, 30) : `<g class="node" transform="translate(0,0)"><circle class="bg" r="30"/><text y="48">${t("Router")}</text></g>`;
     svg.innerHTML = links + nodes;
   }
 

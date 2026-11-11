@@ -107,6 +107,34 @@ async def doh(request: Request):
     return Response(out, media_type="application/dns-message", headers={"cache-control": "max-age=0"})
 
 
+# ---------------------------------------------------------------- certificado raíz de la CA local (público)
+@app.get("/ca.crt", include_in_schema=False)
+async def ca_crt():
+    from . import tls
+    if not tls.CA_CERT.exists():
+        return Response("La autoridad certificadora local aún no se ha creado", status_code=404)
+    return Response(tls.ca_der(), media_type="application/x-x509-ca-cert",
+                    headers={"content-disposition": 'attachment; filename="bipon-ca.crt"'})
+
+
+@app.get("/ca.pem", include_in_schema=False)
+async def ca_pem():
+    from . import tls
+    if not tls.CA_CERT.exists():
+        return Response(status_code=404)
+    return Response(tls.CA_CERT.read_bytes(), media_type="application/x-pem-file",
+                    headers={"content-disposition": 'attachment; filename="bipon-ca.pem"'})
+
+
+@app.get("/ca.mobileconfig", include_in_schema=False)
+async def ca_mobileconfig():
+    from . import tls
+    if not tls.CA_CERT.exists():
+        return Response(status_code=404)
+    return Response(tls.ca_mobileconfig(), media_type="application/x-apple-aspen-config",
+                    headers={"content-disposition": 'attachment; filename="bipon-ca.mobileconfig"'})
+
+
 if FRONTEND_DIR.exists():
     from fastapi.staticfiles import StaticFiles
 
@@ -138,8 +166,11 @@ async def _serve() -> None:
     if s.get("enabled", True):
         try:
             tls.generate_self_signed()
-            servers.append(uvicorn.Server(uvicorn.Config(app, host=WEB_HOST, port=int(s.get("port", 8443)), log_level="warning",
-                                                         ssl_certfile=str(tls.CERT), ssl_keyfile=str(tls.KEY), lifespan="off")))
+            hcfg = uvicorn.Config(app, host=WEB_HOST, port=int(s.get("port", 8443)), log_level="warning",
+                                  ssl_certfile=str(tls.CERT), ssl_keyfile=str(tls.KEY), lifespan="off")
+            hcfg.load()
+            tls.register_context(hcfg.ssl)  # renovar el certificado no requiere reiniciar
+            servers.append(uvicorn.Server(hcfg))
         except Exception as exc:
             log.error("HTTPS desactivado: %s", exc)
     async def optional(srv) -> None:

@@ -46,6 +46,151 @@ async def setup_complete(request: Request, body: dict = Body(...)):
 
 
 # =====================================================================
+# Autoridad certificadora local
+# =====================================================================
+def _ca_state(c) -> dict:
+    tcfg = c.settings.get("tls") or {}
+    names, ips = tls.default_names()
+    from .wireguard import qr_svg
+    url = f"http://{c.devices.self_ip or '127.0.0.1'}:{int(c.settings.get('web.port', 8080) or 8080)}/ca.crt"
+    return {"ca": tls.ca_info(), "certificate": tls.info(), "issued": tls.issued(), "extra_names": tcfg.get("extra_names") or [],
+            "ca_url": url, "qr": qr_svg(url) if tls.CA_CERT.exists() else None,
+            "panel_names": names + ips, "download": {"crt": "/ca.crt", "pem": "/ca.pem", "mobileconfig": "/ca.mobileconfig"},
+            "self_ip": c.devices.self_ip, "web_port": int(c.settings.get("web.port", 8080) or 8080)}
+
+
+@api.get("/tls/ca")
+async def ca_get(request: Request):
+    return _ca_state(ctx(request))
+
+
+@api.post("/tls/ca")
+async def ca_create(request: Request, body: dict = Body(default={})):
+    """Crea la CA local y firma con ella el certificado del panel (HTTPS, DoH y DoT sin avisos)."""
+    c = ctx(request)
+    try:
+        if body.get("force") and tls.CA_CERT.exists():
+            import shutil
+            shutil.copy(tls.CA_CERT, tls.TLS_DIR / f"ca-anterior-{int(time.time())}.pem")
+        tls.create_ca(body.get("extra_domains") or [], bool(body.get("constrained", True)), bool(body.get("force")))
+        tls.issue_bipon((c.settings.get("tls") or {}).get("extra_names") or [])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    c.db.event("info", "seguridad", "Autoridad certificadora local creada; certificado del panel firmado")
+    return _ca_state(c)
+
+
+@api.post("/tls/ca/panel")
+async def ca_panel(request: Request, body: dict = Body(default={})):
+    """Vuelve a firmar el certificado del panel (p. ej. con nombres extra como bipon.midominio.lan)."""
+    c = ctx(request)
+    cfg = c.settings.get("tls") or {}
+    if "extra_names" in body:
+        cfg["extra_names"] = [str(x).strip() for x in body["extra_names"] if str(x).strip()][:30]
+        c.settings.set("tls", cfg, notify=False)
+    try:
+        tls.issue_bipon(cfg.get("extra_names") or [])
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return _ca_state(c)
+
+
+def _add_local_record(c, name: str, ip: str) -> None:
+    d = c.settings.get("dns") or {}
+    recs = [r for r in (d.get("local_records") or []) if r.get("name") != name]
+    recs.append({"name": name, "type": "AAAA" if ":" in ip else "A", "value": ip})
+    d["local_records"] = recs
+    c.settings.set("dns", d, notify=False)
+    c.dns.set_local_records(recs)
+
+
+@api.post("/tls/issued")
+async def ca_issue(request: Request, body: dict = Body(...)):
+    c = ctx(request)
+    raw = [x for x in re.split(r"[\s,;]+", str(body.get("names", ""))) if x]
+    try:
+        cert = tls.issue(str(body.get("label") or raw[0] if raw else "equipo"), raw, [], int(body.get("days") or 825),
+                         "rsa" if body.get("key_type") == "rsa" else "ec")
+    except (ValueError, IndexError) as exc:
+        raise HTTPException(400, str(exc) or "Indica al menos un nombre o una IP")
+    if body.get("dns_record"):
+        names = [n for n in cert["names"] if not tls._is_ip(n) and not n.startswith("*.")]
+        ips = [n for n in cert["names"] if tls._is_ip(n) and not n.startswith("127.")]
+        if names and ips:
+            for n in names:
+                _add_local_record(c, n, ips[0])
+    c.db.event("info", "seguridad", f"Certificado emitido para {cert['label']} ({', '.join(cert['names'])})")
+    return cert
+
+
+@api.post("/tls/issued/{cid}/renew")
+async def ca_renew(request: Request, cid: str):
+    try:
+        return tls.renew_issued(cid)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@api.delete("/tls/issued/{cid}")
+async def ca_delete(request: Request, cid: str):
+    try:
+        tls.delete_issued(cid)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True}
+
+
+@api.post("/tls/issued/{cid}/download")
+async def ca_download(request: Request, cid: str, body: dict = Body(default={})):
+    try:
+        data, name, mime = tls.export_issued(cid, str(body.get("format", "pem")), str(body.get("password", "")))
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc))
+    return Response(data, media_type=mime, headers={"content-disposition": f'attachment; filename="{name}"'})
+
+
+@api.post("/tls/proxmox")
+async def ca_proxmox(request: Request):
+    """Firma y coloca un certificado en cada nodo de Proxmox (https://nodo:8006 sin avisos).
+    Requiere el token de Integraciones con permiso Sys.Modify (root sin «Privilege Separation»)."""
+    import httpx
+    c = ctx(request)
+    pc = (c.settings.get("integrations") or {}).get("proxmox") or {}
+    if not pc.get("url"):
+        raise HTTPException(400, "Conecta primero Proxmox en Integraciones")
+    base = pc["url"].rstrip("/") + "/api2/json"
+    headers = {"Authorization": f"PVEAPIToken={pc['token_id']}={pc['secret']}"}
+    host_in_url = (re.match(r"https?://\[?([^\]/:]+)", pc["url"]) or [None, None])[1]
+    out = []
+    async with httpx.AsyncClient(verify=bool(pc.get("verify_tls")), timeout=30, headers=headers) as h:
+        r = await h.get(f"{base}/cluster/status")
+        if r.status_code != 200:
+            raise HTTPException(400, f"Proxmox respondió HTTP {r.status_code}")
+        nodes = [n for n in r.json()["data"] if n.get("type") == "node"]
+        for n in nodes:
+            names = [n["name"].lower(), f"{n['name'].lower()}.lan"]
+            ips = [n.get("ip")] if n.get("ip") else []
+            if host_in_url and tls._is_ip(host_in_url) and len(nodes) == 1 and host_in_url not in ips:
+                ips.append(host_in_url)
+            try:
+                cert = tls.issue(f"Proxmox {n['name']}", names + ips, [], 825, "rsa")
+                pem, _, _ = tls.export_issued(cert["id"], "pem")
+                key, _, _ = tls.export_issued(cert["id"], "key")
+                rr = await h.post(f"{base}/nodes/{n['name']}/certificates/custom",
+                                  data={"certificates": pem.decode(), "key": key.decode(), "force": 1, "restart": 1})
+                if rr.status_code != 200:
+                    raise RuntimeError(f"HTTP {rr.status_code}: {rr.text[:160]}"
+                                       + (" — el token necesita permiso Sys.Modify (desmarca «Privilege Separation»)" if rr.status_code == 403 else ""))
+                if ips:
+                    _add_local_record(c, f"{n['name'].lower()}.lan", ips[0])
+                out.append({"node": n["name"], "ok": True, "names": cert["names"]})
+            except Exception as exc:
+                out.append({"node": n["name"], "ok": False, "error": str(exc)[:240]})
+    c.db.event("info", "seguridad", "Certificados enviados a Proxmox: " + ", ".join(f"{o['node']} {'✓' if o['ok'] else '✗'}" for o in out))
+    return {"nodes": out}
+
+
+# =====================================================================
 # Notificaciones
 # =====================================================================
 @api.get("/notify")

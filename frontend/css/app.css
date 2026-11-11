@@ -164,8 +164,8 @@ td.actions { white-space: nowrap; text-align: right; }
 .dev-card .meta { flex: 1; min-width: 0; } .dev-card .meta b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dev-card .meta span { color: var(--muted); font-size: 12px; }
 .dev-card.offline { opacity: .6; }
-.netmap { width: 100%; height: 560px; background: radial-gradient(circle at center, var(--card-2), var(--card)); border-radius: var(--radius); border: 1px solid var(--border); position: relative; overflow: hidden; }
-.netmap svg { width: 100%; height: 100%; }
+.netmap { width: 100%; min-height: 560px; background: radial-gradient(circle at center, var(--card-2), var(--card)); border-radius: var(--radius); border: 1px solid var(--border); position: relative; overflow: hidden; }
+.netmap svg { width: 100%; height: 560px; display: block; }
 .netmap .node { cursor: pointer; } .netmap .node circle.bg { fill: var(--card-2); stroke: var(--border); stroke-width: 1.5; transition: .15s; }
 .netmap .node:hover circle.bg { stroke: var(--accent); stroke-width: 2.5; }
 .netmap .node text { fill: var(--text); font-size: 11px; text-anchor: middle; }

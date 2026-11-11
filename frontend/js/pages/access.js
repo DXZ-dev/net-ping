@@ -28,7 +28,7 @@ export async function render(el, app) {
         ${tokens.length ? tokens.map((x) => `<div class="row between rec mb"><span><b>${esc(x.name)}</b> <span class="badge">${t(ROLE[x.role][0])}</span><br><span class="small muted">${t("creado")} ${ago(x.created)} · ${x.last_used ? `${t("usado")} ${ago(x.last_used)}` : t("sin usar")}</span></span>
           <button class="icon-btn" data-tdel="${x.id}">${ico("trash")}</button></div>`).join("") : empty(t("Sin tokens"))}</div>
       <div class="card"><header><h2>${ico("lock")}${t("HTTPS y DNS cifrado")}</h2></header>
-        <dl class="kv small"><dt>${t("Certificado")}</dt><dd>${cert.present ? `${esc(cert.subject)} ${cert.self_signed ? `<span class="badge warn">${t("autofirmado")}</span>` : `<span class="badge ok">${t("de confianza")}</span>`}` : "—"}</dd>
+        <dl class="kv small"><dt>${t("Certificado")}</dt><dd>${cert.present ? `${esc(cert.subject)} ${cert.signed_by_ca ? `<span class="badge ok">${t("firmado por tu CA")}</span>` : cert.self_signed ? `<span class="badge warn">${t("autofirmado")}</span>` : `<span class="badge ok">${t("de confianza")}</span>`}` : "—"}</dd>
           <dt>${t("Caduca")}</dt><dd>${cert.present ? `${cert.days_left} ${t("días")}` : "—"}</dd><dt>${t("Nombres")}</dt><dd class="mono">${esc((cert.names || []).join(", "))}</dd></dl>
         <form id="tlf" class="mt">
           <div class="opt"><div class="t"><b>${t("Panel por HTTPS")}</b><span>${t("Puerto")} ${tls.settings.port || 8443}</span></div>${toggle("enabled", tls.settings.enabled !== false)}</div>
@@ -36,7 +36,9 @@ export async function render(el, app) {
           <div class="opt"><div class="t"><b>DNS-over-HTTPS</b><span>/dns-query</span></div>${toggle("doh", tls.settings.doh !== false)}</div>
           <div class="opt"><div class="t"><b>DNS-over-TLS</b><span>${t("Puerto")} 853 — ${t("«DNS privado» de Android con un certificado válido")}</span></div>${toggle("dot", tls.settings.dot !== false)}</div>
           <div class="row mt"><button class="btn primary">${ico("check")}${t("Guardar")}</button><button type="button" class="btn" id="cert-up">${ico("upload")}${t("Usar mi certificado")}</button><button type="button" class="btn ghost" id="cert-regen">${t("Regenerar autofirmado")}</button></div>
-          <p class="small muted mt">${t("Los cambios de HTTPS se aplican al reiniciar Bipon.")}</p></form></div></div>`;
+          <p class="small muted mt">${t("Los cambios de HTTPS se aplican al reiniciar Bipon.")}</p></form></div></div>
+    <div id="ca-box" class="mt"></div>`;
+  import("./ca.js").then((m) => m.renderCA(el.querySelector("#ca-box"), app)).catch((e) => { el.querySelector("#ca-box").innerHTML = `<div class="alert err">${esc(e.message)}</div>`; });
 
   on(el, "change", "[data-role]", (e, s) => api.patch(`/users/${s.dataset.role}`, { role: s.value }).then(() => toast(t("Rol actualizado"))).catch((err) => { toastErr(err); app.reload(); }));
   on(el, "click", "[data-del]", async (e, b) => { if (await confirmDialog(t("Eliminar usuario"), t("¿Seguro?"))) { await api.del(`/users/${b.dataset.del}`).catch(toastErr); app.reload(); } });
