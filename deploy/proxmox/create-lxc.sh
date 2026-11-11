@@ -71,8 +71,18 @@ lxc.mount.entry: /dev/net/tun dev/net/tun none bind,create=file
 EOF
 ok "Contenedor creado (TUN habilitado)"
 
-# reenvío IP en el host (necesario para que los clientes VPN lleguen a la LAN)
-sysctl -q -w net.ipv4.ip_forward=1 || true
+# reenvío IP en el host (VPN y modo router), persistente
+echo "net.ipv4.ip_forward=1" > /etc/sysctl.d/99-bipon-net.conf
+sysctl -q -p /etc/sysctl.d/99-bipon-net.conf || true
+
+# módulos del kernel que el contenedor usa (un LXC sin privilegios no puede cargarlos por sí mismo):
+# firewall/NAT del modo router, conntrack, límites de velocidad (HTB, fq_codel, IFB) y anti-bufferbloat (CAKE)
+MODS="nf_tables nft_nat nft_masq nft_ct nf_conntrack nf_nat sch_htb sch_fq_codel sch_cake ifb act_mirred cls_u32 tun wireguard"
+: > /etc/modules-load.d/bipon-net.conf
+for m in $MODS; do
+  if modprobe "$m" 2>/dev/null; then echo "$m" >> /etc/modules-load.d/bipon-net.conf; fi
+done
+ok "Módulos del kernel listos en el host (se cargan también al reiniciar)"
 
 pct start "$CTID"
 info "Esperando a la red del contenedor…"

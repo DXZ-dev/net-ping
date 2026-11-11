@@ -50,11 +50,13 @@ c_info "Instalando dependencias del sistema…"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 PKGS=(python3 python3-venv python3-pip unbound dns-root-data iputils-ping traceroute whois iproute2 iptables nftables conntrack
-      ca-certificates curl tzdata rsync git)
+      ca-certificates curl tzdata rsync git openssh-client)
 apt-cache show unbound-anchor >/dev/null 2>&1 && PKGS+=(unbound-anchor)
 [[ $WITH_VPN -eq 1 ]] && PKGS+=(wireguard-tools openvpn)
 apt-get install -y -qq --no-install-recommends "${PKGS[@]}" >/dev/null
 c_ok "Paquetes instalados"
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' \
+  || { echo "Bipon Net necesita Python 3.9 o superior (Debian 11+ / Ubuntu 22.04+)."; exit 1; }
 
 if [[ $WITH_TS -eq 1 ]] && ! command -v tailscale >/dev/null; then
   c_info "Instalando Tailscale (repositorio oficial)…"

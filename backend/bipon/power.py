@@ -32,6 +32,27 @@ METHOD_LABEL = {"wol": "Wake-on-LAN (encender)", "ha": "Home Assistant (enchufe 
                 "ssh": "SSH (apagar PC/servidor)", "http": "HTTP del dispositivo (Shelly)", "playstation": "PlayStation"}
 
 
+def ssh_key() -> tuple[str, str]:
+    """Clave SSH propia de Bipon (en su carpeta de datos, para que funcione igual en Docker, Linux y Proxmox).
+    Devuelve (ruta_clave_privada, clave_pública_en_formato_openssh)."""
+    import os
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from .config import DATA_DIR
+    d = DATA_DIR / "ssh"
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o700)
+    priv, pub = d / "id_ed25519", d / "id_ed25519.pub"
+    if not priv.exists():
+        k = Ed25519PrivateKey.generate()
+        data = k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH, serialization.NoEncryption())
+        fd = os.open(priv, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        pub.write_bytes(k.public_key().public_bytes(serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH) + b" bipon-net\n")
+    return str(priv), pub.read_text().strip()
+
+
 class PowerControl:
     def __init__(self, ctx):
         self.ctx = ctx
@@ -139,8 +160,10 @@ class PowerControl:
             raise RuntimeError("el cliente ssh no está instalado en Bipon")
         user = cfg.get("ssh_user") or "root"
         port = str(cfg.get("ssh_port") or 22)
-        # se usa la clave del sistema; para apagado con contraseña, configúralo con clave SSH en Bipon
-        cmd = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=6",
+        key, _ = ssh_key()
+        from .config import DATA_DIR
+        cmd = ["ssh", "-i", key, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new",
+               "-o", f"UserKnownHostsFile={DATA_DIR / 'ssh' / 'known_hosts'}", "-o", "ConnectTimeout=6",
                "-p", port, f"{user}@{host}", "sudo -n poweroff || sudo -n shutdown -h now || poweroff"]
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
         try:

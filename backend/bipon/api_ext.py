@@ -886,6 +886,14 @@ async def power_caps(request: Request, mac: str):
     return {**c.power.capabilities(mac), "config": c.power.config_for(mac) | ({"password": "••••••"} if c.power.config_for(mac).get("password") else {})}
 
 
+@api.get("/power/ssh-key")
+async def power_ssh_key(request: Request):
+    """Clave pública de Bipon para añadir a ~/.ssh/authorized_keys de los equipos que quieras apagar por SSH."""
+    from .power import ssh_key
+    _, pub = ssh_key()
+    return {"public_key": pub, "command": f"echo '{pub}' >> ~/.ssh/authorized_keys"}
+
+
 @api.put("/devices/{mac}/power")
 async def power_config(request: Request, mac: str, body: dict = Body(...)):
     c = ctx(request)

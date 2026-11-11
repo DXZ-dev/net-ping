@@ -1,4 +1,4 @@
-import { api, esc, ico, ms, num, ago, toast, toastErr, busy, drawer, on, $, $$, KIND_LABEL, empty, confirmDialog, lineChart, COLORS, time as fmtTime } from "../lib.js";
+import { api, esc, ico, ms, num, ago, toast, toastErr, busy, drawer, on, $, $$, KIND_LABEL, empty, confirmDialog, copy, lineChart, COLORS, time as fmtTime } from "../lib.js";
 import { t } from "../i18n.js";
 import { brandIcon, appIcon } from "../brands.js";
 
@@ -461,11 +461,17 @@ async function drawPower(box, mac) {
   const drawExtra = (m) => {
     extra.innerHTML = m === "ha" ? `<label class="field mt">${t("Entidad de Home Assistant")}<input id="pw-ent" value="${esc(cfg.ha_entity || "")}" placeholder="switch.enchufe_tv"></label>`
       : m === "ssh" ? `<div class="form-grid mt"><label class="field">${t("Host SSH")}<input id="pw-host" value="${esc(cfg.ssh_host || "")}" placeholder="${t("IP del equipo")}"></label>
-          <label class="field">${t("Usuario")}<input id="pw-user" value="${esc(cfg.ssh_user || "root")}"></label></div><p class="small muted">${t("Usa la clave SSH de Bipon; el usuario debe poder apagar con sudo sin contraseña.")}</p>`
+          <label class="field">${t("Usuario")}<input id="pw-user" value="${esc(cfg.ssh_user || "root")}"></label></div><p class="small muted">${t("Usa la clave SSH de Bipon; el usuario debe poder apagar con sudo sin contraseña.")}</p>
+          <p class="small mt">${t("Añade esta clave en el equipo (~/.ssh/authorized_keys):")}</p><pre class="small" id="pw-key" style="white-space:pre-wrap;word-break:break-all">…</pre><button type="button" class="btn sm" id="pw-kcp">${ico("copy")}${t("Copiar comando")}</button>`
       : m === "http" ? `<p class="small muted mt">${t("Shelly: se usa su IP directamente (http://IP/relay/0).")}</p>` : `<p class="small muted mt">${t("Wake-on-LAN no necesita configuración, pero el equipo debe tenerlo activado en la BIOS/tarjeta de red.")}</p>`;
   };
-  drawExtra(method);
-  box.querySelector("#pw-m").onchange = (e) => drawExtra(e.target.value);
+  const loadKey = () => {
+    const pre = box.querySelector("#pw-key");
+    if (!pre) return;
+    api.get("/power/ssh-key").then((k) => { pre.textContent = k.public_key; box.querySelector("#pw-kcp").onclick = () => copy(k.command); }).catch(() => { pre.textContent = "—"; });
+  };
+  drawExtra(method); loadKey();
+  box.querySelector("#pw-m").onchange = (e) => { drawExtra(e.target.value); loadKey(); };
   box.querySelector("#pw-save").onclick = (e) => {
     const m = box.querySelector("#pw-m").value;
     const body = { method: m, ha_entity: box.querySelector("#pw-ent")?.value, ssh_host: box.querySelector("#pw-host")?.value, ssh_user: box.querySelector("#pw-user")?.value };

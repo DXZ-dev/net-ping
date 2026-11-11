@@ -110,7 +110,7 @@ class Updater:
         if not src:
             return {"ok": False, "mode": mode, "message": "No se encontró la copia git de Bipon Net. Reinstala con deploy/linux/install.sh."}
         script = src / "deploy" / "linux" / "update.sh"
-        env = {**os.environ, "BIPON_BRANCH": info.get("branch") or "main"}
+        env = {**os.environ, "BIPON_BRANCH": info.get("branch") or "main", "BIPON_REPO": self.cfg().get("repo") or DEFAULT_REPO}
         c = self.cfg()
         if c.get("token"):
             env["BIPON_GIT_TOKEN"] = c["token"]

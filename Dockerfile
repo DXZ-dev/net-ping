@@ -15,7 +15,7 @@ RUN apt-get update \
       unbound unbound-anchor dns-root-data \
       iputils-ping traceroute whois iproute2 iptables nftables conntrack \
       wireguard-tools openvpn \
-      ca-certificates curl gnupg tzdata procps \
+      ca-certificates curl gnupg tzdata procps openssh-client \
  && if [ "$WITH_TAILSCALE" = "1" ]; then \
       curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
       && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list -o /etc/apt/sources.list.d/tailscale.list \
@@ -33,7 +33,8 @@ COPY frontend /app/frontend
 
 WORKDIR /app/backend
 VOLUME ["/data"]
-EXPOSE 53/udp 53/tcp 8080/tcp
+# Con network_mode: host estos puertos son informativos
+EXPOSE 53/udp 53/tcp 8080/tcp 8443/tcp 853/tcp 80/tcp 67/udp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
   CMD python -c "import os,urllib.request;urllib.request.urlopen('http://127.0.0.1:%s/api/auth/status' % os.environ.get('BIPON_WEB_PORT','8080'), timeout=4)" || exit 1
