@@ -84,6 +84,8 @@ class Context:
         self.guard = Guard(self)
         from .notify import TelegramBot
         self.telegram = TelegramBot(self)
+        from .gateway import Gateway
+        self.gateway = Gateway(self)
         self.routerctl = RouterControl(self)
         self.configs = ConfigProfiles(self)
         self.updater = Updater(self)

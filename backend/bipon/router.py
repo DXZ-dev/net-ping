@@ -127,19 +127,34 @@ class RouterManager:
             ifs = "{ " + ", ".join(f'"{i}"' for i in lan_ifs) + " }"
             lines.append(f"    iifname {ifs} ip daddr != {self_ip} udp dport 53 counter dnat ip to {self_ip}:{dns_port} comment \"DNS forzado\"")
             lines.append(f"    iifname {ifs} ip daddr != {self_ip} tcp dport 53 counter dnat ip to {self_ip}:{dns_port} comment \"DNS forzado\"")
+        one_arm = bool(c.get("wan")) and c.get("wan") == c.get("lan")
+        lan_net = self._iface_net(c.get("lan")) if one_arm else None
         if c.get("wan"):
             for f in c.get("port_forwards", []):
                 to_port = int(f.get("to_port") or f["port"])
-                lines.append(f"    iifname \"{c['wan']}\" {f['proto']} dport {int(f['port'])} counter dnat ip to {f['to_ip']}:{to_port} "
+                only_self = f"ip daddr {self_ip} " if one_arm else ""  # con un cable, no capturar tráfico de la propia LAN
+                lines.append(f"    iifname \"{c['wan']}\" {only_self}{f['proto']} dport {int(f['port'])} counter dnat ip to {f['to_ip']}:{to_port} "
                              f"comment \"{re.sub(r'[^A-Za-z0-9 _.-]', '', f.get('name', 'redirección'))[:40]}\"")
         lines.append("  }")
         lines.append("  chain postrouting {")
         lines.append("    type nat hook postrouting priority srcnat; policy accept;")
         if c.get("nat") and c.get("wan"):
-            lines.append(f"    oifname \"{c['wan']}\" masquerade")
+            if one_arm and lan_net:
+                # puerta de enlace con un solo cable: lo que sale hacia el router del proveedor se enmascara con la IP de
+                # Bipon, así la respuesta vuelve por Bipon (bajada medible y limitable); lo local no se toca
+                lines.append(f"    oifname \"{c['wan']}\" ip saddr {lan_net} ip daddr != {lan_net} masquerade comment \"gateway un brazo\"")
+            else:
+                lines.append(f"    oifname \"{c['wan']}\" masquerade")
         lines.append("  }")
         lines.append("}")
         return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _iface_net(iface: str | None) -> str | None:
+        for i in netinfo.interfaces():
+            if i.get("name") == iface:
+                return i.get("network")
+        return None
 
     @staticmethod
     def _zone_iface(z: dict, c: dict) -> str:
@@ -180,16 +195,19 @@ class RouterManager:
             raise RuntimeError("nftables (nft) no está instalado")
         c = self.validate(c or self.cfg())
         previous = await self._current_table()
+        prev_cfg = dict(self.cfg())
         if not c.get("enabled"):
             if previous:
                 await _run("nft", "delete", "table", "inet", "bipon")
             self.ctx.settings.set("router", c, notify=False)
             return {"ok": True, "message": "Modo router desactivado (reglas eliminadas)"}
-        try:
-            with open("/proc/sys/net/ipv4/ip_forward", "w") as fh:
-                fh.write("1")
-        except OSError:
-            pass
+        for path, val in [("/proc/sys/net/ipv4/ip_forward", "1"), ("/proc/sys/net/ipv4/conf/all/send_redirects", "0"),
+                          *([(f"/proc/sys/net/ipv4/conf/{c['lan']}/send_redirects", "0")] if c.get("lan") else [])]:
+            try:
+                with open(path, "w") as fh:
+                    fh.write(val)
+            except OSError:
+                pass
         notes = await self._zones_up(c)
         ok, out = await self._load(self.ruleset(c))
         if not ok:
@@ -197,7 +215,7 @@ class RouterManager:
             return {"ok": False, "message": out}
         self.ctx.settings.set("router", c, notify=False)
         if confirm_required:
-            self.pending = {"previous": previous, "deadline": time.time() + ROLLBACK_SECONDS}
+            self.pending = {"previous": previous, "prev_cfg": prev_cfg, "deadline": time.time() + ROLLBACK_SECONDS}
             if self._rollback_task:
                 self._rollback_task.cancel()
             self._rollback_task = asyncio.create_task(self._rollback_later())
@@ -208,7 +226,10 @@ class RouterManager:
         await asyncio.sleep(ROLLBACK_SECONDS)
         if self.pending:
             prev = self.pending["previous"]
+            prev_cfg = self.pending.get("prev_cfg")
             self.pending = None
+            if prev_cfg is not None:  # si no, el bucle de mantenimiento volvería a aplicar lo no confirmado
+                self.ctx.settings.set("router", prev_cfg, notify=False)
             if prev:
                 await _run("nft", "-f", "-", input="delete table inet bipon\n" + prev)
             else:

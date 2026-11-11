@@ -1088,6 +1088,40 @@ async def blocking_suggestion_dismiss(request: Request, body: dict = Body(...)):
     return {"ok": True}
 
 
+# =====================================================================
+# Asistente de puerta de enlace (Huawei como módem/Wi-Fi, Bipon como gateway con un cable)
+# =====================================================================
+@api.get("/gateway")
+async def gateway_status(request: Request):
+    return ctx(request).gateway.status()
+
+
+@api.get("/gateway/precheck")
+async def gateway_precheck(request: Request):
+    return await ctx(request).gateway.precheck()
+
+
+@api.post("/gateway/routing")
+async def gateway_routing(request: Request):
+    try:
+        return await ctx(request).gateway.enable_routing()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@api.post("/gateway/dhcp")
+async def gateway_dhcp(request: Request):
+    try:
+        return await ctx(request).gateway.enable_dhcp()
+    except (ValueError, RuntimeError, KeyError) as exc:
+        raise HTTPException(400, str(exc))
+
+
+@api.post("/gateway/disable")
+async def gateway_disable(request: Request):
+    return await ctx(request).gateway.disable()
+
+
 @api.get("/speedctl")
 async def speedctl_get(request: Request):
     """Método con el que se limitaría la velocidad de cada dispositivo."""

@@ -47,6 +47,7 @@ const ENTRIES = [
   ["Wi-Fi", "network", "wifi", null, "unifi openwrt mikrotik canal señal"],
   ["Portal de bienvenida", "network", "captive", null, "portal cautivo terminos condiciones"],
   ["Acceso local / externo", "network", "access", null, "acceso remoto seguridad panel exterior"],
+  ["Bipon como puerta de enlace", "router", "gw", null, "gateway puerta enlace control total huawei ap bridge un cable"],
   ["Mi router", "router", "control", null, "router isp huawei openwrt mikrotik fritzbox reiniciar"],
   ["Modo router y firewall", "router", "mode", null, "firewall nftables zonas vlan redireccion puertos"],
   ["Velocidad por dispositivo", "router", "speed", null, "limitar velocidad limite ancho de banda"],

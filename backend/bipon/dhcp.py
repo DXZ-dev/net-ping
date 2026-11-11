@@ -201,8 +201,9 @@ class DHCPServer:
         c = self.cfg()
         net = ipaddress.ip_network(f"{c['server_ip']}/{c['netmask']}", strict=False)
         dns = [d for d in (c.get("dns") or [c["server_ip"]]) if d][:3]
-        if c.get("backup_dns_router") and c.get("router") and c["router"] not in dns:
-            dns = (dns + [c["router"]])[:3]  # si Bipon se apaga, los equipos siguen resolviendo con el router
+        backup = c.get("isp_router") or c.get("router")  # en modo puerta de enlace el «router» es Bipon
+        if c.get("backup_dns_router") and backup and backup not in dns:
+            dns = (dns + [backup])[:3]  # si Bipon se apaga, los equipos siguen resolviendo con el router
         opts = [(51, struct.pack("!I", lease_time)), (58, struct.pack("!I", lease_time // 2)), (59, struct.pack("!I", lease_time * 7 // 8)),
                 (1, _ip(c["netmask"])), (3, _ip(c["router"])), (6, b"".join(_ip(d) for d in dns)), (28, _ip(str(net.broadcast_address)))]
         if c.get("domain"):

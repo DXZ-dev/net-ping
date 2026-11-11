@@ -9,7 +9,7 @@ const rate = (bps) => bps == null ? "—" : bps >= 1e6 ? `${(bps / 1e6).toFixed(
 
 export async function render(el) {
   let tab = sessionStorage.getItem("np-rt-tab") || "control";
-  el.innerHTML = `<div class="tabs mb"><button data-tab="control">${ico("router")}${t("Mi router")}</button><button data-tab="mode">${ico("shield")}${t("Modo router y firewall")}</button>
+  el.innerHTML = `<div class="tabs mb"><button data-tab="gw">${ico("zap")}${t("Bipon como puerta de enlace")}</button><button data-tab="control">${ico("router")}${t("Mi router")}</button><button data-tab="mode">${ico("shield")}${t("Modo router y firewall")}</button>
     <button data-tab="speed">${ico("gauge")}${t("Velocidad por dispositivo")}</button><button data-tab="traffic">${ico("activity")}${t("Consumo de datos")}</button></div><div id="pane"></div>`;
   let pane = el.querySelector("#pane");
   let timer;
@@ -23,6 +23,54 @@ export async function render(el) {
   }
 
   const V = {
+    // ------------------------------------------------------------ asistente de puerta de enlace (un solo cable)
+    async gw() {
+      const st = await api.get("/gateway");
+      if (st.active) {
+        const tk = st.takeover || {};
+        pane.innerHTML = `<div class="card"><header><h2>${ico("check")}${t("Bipon es la puerta de enlace de tu red")}</h2><span class="badge ok">${t("activo")}</span></header>
+          <div class="grid g3 mt">
+            <div class="card stat"><div class="ic tint-green">${ico("devices")}</div><div><div class="v">${tk.bipon ?? "—"} / ${tk.total ?? "—"}</div><div class="l">${t("equipos con IP de Bipon")}</div></div></div>
+            <div class="card stat"><div class="ic tint-blue">${ico("activity")}</div><div><div class="v">${st.through}</div><div class="l">${t("equipos con tráfico pasando ahora por Bipon")}</div></div></div>
+            <div class="card stat"><div class="ic tint-violet">${ico("shield")}</div><div><div class="v">${t("Total")}</div><div class="l">${t("límites, pausas y firewall por equipo")}</div></div></div></div>
+          ${tk.pending?.length ? `<p class="small muted mt">${t("Aún con la puerta de enlace del router (pasarán al reconectar el Wi-Fi o al renovar su IP)")}: ${tk.pending.slice(0, 10).map((x) => esc(x.name)).join(", ")}</p>` : ""}
+          <h4 class="mt mb">${t("Para juegos (NAT abierto)")}</h4>
+          <p class="small muted">${t("En tu router Huawei pon la IP de Bipon en «DMZ» y crea aquí, en «Modo router y firewall», la redirección de puertos de tu consola. Así el NAT de tus juegos queda abierto.")}</p>
+          <div class="row mt"><button class="btn danger" id="gw-off">${ico("x")}${t("Dejar de ser la puerta de enlace")}</button></div></div>`;
+        pane.querySelector("#gw-off").onclick = async (e) => {
+          if (!(await confirmDialog(t("Desactivar"), t("Los equipos volverán a usar el router del proveedor al renovar su IP (máx. 30 min). ¿Continuar?")))) return;
+          busy(e.currentTarget, () => api.post("/gateway/disable")).then(() => { toast(t("Desactivado")); show(); }).catch(() => {});
+        };
+        return;
+      }
+      const pre = await api.get("/gateway/precheck");
+      const ICON = { ok: ["ok", "check"], warn: ["warn", "alert"], fail: ["err", "x"] };
+      pane.innerHTML = `<div class="card mb"><header><h2>${ico("zap")}${t("Bipon como puerta de enlace")}</h2></header>
+          <p class="muted small">${t("Así Bipon controla TODO el tráfico de la casa (cable y Wi-Fi) sin tocar la configuración del proveedor: el Huawei sigue siendo módem, Wi-Fi y switch, y Bipon pasa a ser la puerta de enlace que reparte su DHCP. Con eso funcionan de verdad los límites de velocidad, las pausas, el corte de intrusos y «Proteger mi partida».")}</p>
+          <pre class="small mt" style="line-height:1.4">Internet ── Huawei (módem + Wi-Fi + switch)
+                  │
+     tus equipos ─┴─ Bipon ${esc(pre.self_ip || "")} (puerta de enlace)</pre></div>
+        <div class="card mb"><header><h3>${ico("list")}${t("1. Comprobaciones")}</h3><button class="btn sm" id="gw-re">${ico("refresh")}${t("Repetir")}</button></header>
+          <div class="col">${pre.checks.map((c) => `<div class="row rec" style="flex-wrap:nowrap;align-items:flex-start"><span class="badge ${ICON[c.status][0]}">${ico(ICON[c.status][1])}</span><div class="grow"><b>${esc(t(c.title))}</b><div class="small muted">${esc(t(c.detail))}</div></div></div>`).join("")}</div></div>
+        <div class="card mb"><header><h3>${ico("shield")}${t("2. Activar el reenvío (con seguridad)")}</h3>${st.routing ? `<span class="badge ok">${t("hecho")}</span>` : ""}</header>
+          <p class="small muted mb">${t("Se activa el firewall de Bipon. Si en 60 s no confirmas (por ejemplo porque perdiste la conexión), se deshace solo.")}</p>
+          <div id="gw-step1">${st.routing && !st.pending ? `<p class="small">${ico("check")} ${t("Reenvío activo y confirmado.")}</p>` : `<button class="btn primary" id="gw-route" ${pre.ready ? "" : "disabled"}>${ico("zap")}${t("Activar")}</button>`}</div></div>
+        <div class="card"><header><h3>${ico("server")}${t("3. Repartir Bipon como puerta de enlace")}</h3></header>
+          <p class="small muted mb">${t("El DHCP de Bipon (principal, con el del router de respaldo) entrega «puerta de enlace = Bipon». Los equipos se pasan solos al reconectar el Wi-Fi o al renovar su IP (concesión de 30 min). Si Bipon se apaga, vuelven al router del proveedor.")}</p>
+          <button class="btn primary" id="gw-dhcp" ${st.routing && !st.pending ? "" : "disabled"}>${ico("check")}${t("Activar y terminar")}</button></div>`;
+      pane.querySelector("#gw-re").onclick = () => show();
+      const r1 = pane.querySelector("#gw-route");
+      if (r1) r1.onclick = (e) => busy(e.currentTarget, () => api.post("/gateway/routing")).then((r) => {
+        if (!r.ok) { toast(r.message, "error", 8000); return; }
+        const box = pane.querySelector("#gw-step1");
+        let left = 60;
+        box.innerHTML = `<div class="alert warn">${ico("alert")}<div class="small"><b>${t("¿Sigues viendo esta página?")}</b> ${t("Confirma para mantener los cambios.")} <span id="gw-left">${left}</span> s</div></div>
+          <button class="btn primary mt" id="gw-ok">${ico("check")}${t("Confirmar")}</button>`;
+        const tmr = setInterval(() => { left -= 1; const l = pane.querySelector("#gw-left"); if (l) l.textContent = left; if (left <= 0) { clearInterval(tmr); toast(t("No se confirmó: cambios revertidos"), "info"); show(); } }, 1000);
+        pane.querySelector("#gw-ok").onclick = (ev) => busy(ev.currentTarget, () => api.post("/router/confirm")).then(() => { clearInterval(tmr); toast(t("Confirmado")); show(); }).catch(() => {});
+      }).catch(() => {});
+      pane.querySelector("#gw-dhcp").onclick = (e) => busy(e.currentTarget, () => api.post("/gateway/dhcp")).then(() => { toast(t("¡Listo! Bipon es la puerta de enlace")); show(); }).catch(() => {});
+    },
     // ------------------------------------------------------------ control del router
     async control() {
       const s = await api.get("/routerctl");
