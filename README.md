@@ -37,6 +37,10 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 | Modo gaming y streaming | — | — | ✅ |
 | Portal cautivo con términos y condiciones | — | — | ✅ |
 | Asistente que analiza la red y aplica la configuración | — | — | ✅ |
+| Vigilante de lag con culpable y «Proteger mi partida» | — | — | ✅ |
+| Bipon como puerta de enlace con un solo cable (sin tocar el router del proveedor) | — | — | ✅ |
+| Rastreadores camuflados (CNAME) y avisos «esto rompió una app» | — | ✅ / — | ✅ |
+| Autoridad certificadora local (HTTPS sin avisos en tu red) | — | — | ✅ |
 
 ---
 
@@ -50,7 +54,10 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 - Listas por categoría (anuncios, seguridad, adultos, personalizadas) — **todas desactivadas al inicio** salvo que las elijas en el registro.
 - Reglas propias, regex, bloqueo de **TLD**, bloqueo por **país** (GeoIP), protección contra **DNS rebinding**.
 - **Bloqueo de aplicaciones** con iconos oficiales: redes sociales, mensajería, videollamadas, streaming, juegos, apuestas, IA, compras…
-- **Detección de anomalías**: malware DGA, túneles DNS, ráfagas, IoT comprometido.
+- **Rastreadores camuflados (CNAME cloaking)** y sugerencias de dominios bloqueados que rompen una app.
+- **Detección de anomalías** (malware DGA, túneles DNS, ráfagas, IoT comprometido) con **cuarentena automática**.
+- **Equipos que se saltan Bipon** (DNS puesto a mano o DNS cifrado externo), **intrusos** con IP fuera de tu red y **auditoría de puertos abiertos por UPnP**.
+- **Autoridad certificadora local**: HTTPS de confianza para el panel, Proxmox, NAS… también por IP.
 
 </td><td valign="top">
 
@@ -59,7 +66,8 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 - **Tiempo de pantalla** diario por perfil y **pausa familiar**.
 - **Control de Internet inmediato**: pausar un dispositivo corta en segundos (y al instante en modo router).
 - **Actividad por dispositivo**: qué apps y webs usa.
-- **Límites de velocidad** por dispositivo.
+- **Controlador de velocidad** por dispositivo (Proxmox, MikroTik, OpenWrt o Bipon como puerta de enlace).
+- **Encender/apagar** equipos: Wake-on-LAN, enchufes de Home Assistant, Shelly o SSH.
 
 </td></tr>
 <tr><td valign="top">
@@ -69,6 +77,9 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 - Caché LRU **optimista** + prefetch + precalentado de dominios de juegos.
 - **Unbound** propio: recursivo, DoT o reenvío; DNSSEC, QNAME minimisation, serve-expired.
 - **Modo gaming y streaming**: cero espera de DNS, infraestructura protegida, ping a regiones.
+- **Unbound autoconfigurado** con los DNS más cercanos a tu ubicación y a tu hardware; caché persistente (< 1 ms tras reiniciar) y precalentada con los dominios de tu casa.
+- **Vigilante de lag**: ping en vivo, picos con su posible culpable, **«Proteger mi partida»** y **preferencia IPv4**.
+- **Calidad de conexión**: Wi-Fi débil por equipo, mapa de lag por hora, ruta a tu juego e **informe para reclamar al proveedor**.
 - **Test de velocidad** con nota de **bufferbloat** (A+ a F).
 
 </td><td valign="top">
@@ -76,7 +87,8 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 ### 🌐 Red
 - **Dispositivos en tiempo real** (sin escanear a mano), fabricante y marca, mapa jerárquico **Proxmox → VMs/LXC**.
 - **Modo automático** (IPv6 RDNSS): Bipon sin tocar el router; si se apaga, la red sigue con el DNS del router.
-- **Servidor DHCP**, zonas/VLAN, **router y firewall** (nftables) con reversión automática.
+- **Servidor DHCP** (único o **principal con el del router de respaldo**), zonas/VLAN, **router y firewall** (nftables) con reversión automática.
+- **Asistente «Bipon como puerta de enlace»**: control total de cable y Wi-Fi con un solo cable, sin tocar el router del proveedor.
 - **Acceso al router** (OpenWrt, MikroTik, FRITZ!Box) sin tocar la configuración del ISP.
 - **NAT**: tipo de NAT (RFC 5780 / consola), estados y sesiones; UPnP.
 - **Puertos TCP/UDP** en uso y qué aplicación los usa.
@@ -94,7 +106,8 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 
 ### 🧰 Sistema
 - Usuarios con **roles** (admin, padres, solo lectura), **2FA (TOTP)**, tokens de API, auditoría.
-- **Notificaciones**: Telegram, Discord, Slack, ntfy, Gotify, email, webhook y **push**.
+- **Notificaciones**: Telegram (con botones **Permitir / Bloquear**), Discord, Slack, ntfy, Gotify, email, webhook y **push**.
+- **Copias de seguridad automáticas** con retención y restauración en un clic; **registros** del sistema; **buscador** (Ctrl+K).
 - **Informes** semanales, **alta disponibilidad** (dos Bipon), Home Assistant, Proxmox.
 - **Perfiles de configuración** para guardar y alternar escenarios.
 - **Actualizaciones** desde GitHub con un botón (o automáticas).
@@ -203,11 +216,28 @@ Crea un LXC Debian 12 no privilegiado (2 CPU, 1 GB, 8 GB), habilita **TUN** para
 
 ## 🧭 Primeros pasos
 
-1. **Registro:** elige país, edición (**Hogar** o **Empresa**) y cómo configurar: **Autoconfigurar**, **Recomendado** o **Manual**.
+1. **Registro:** elige país y cómo configurar: **Autoconfigurar** (mide tu red y los DNS más cercanos y aplica lo mejor), **Recomendado** o **Manual**. Es un solo sistema con todas las funciones.
 2. **Que la red use Bipon:** en el router, *DHCP → servidor DNS = IP de Bipon* (sin DNS secundario externo). Si tu router no lo permite, activa el **modo automático** o el **servidor DHCP** en *Red*.
 3. **Asistente → Analizar mi red** y aplica las recomendaciones.
 4. **Dispositivos:** ponles nombre y asígnales un **perfil**.
 5. Activa la **guía del sistema** desde *Ajustes → Apariencia* cuando quieras repasarla.
+
+### 🎮 Control total sin tocar el router del proveedor
+
+Para limitar la velocidad, pausar Internet o cortar intrusos de **todos** los equipos (cable y Wi-Fi), su tráfico tiene que pasar por Bipon.
+El asistente **Router y firewall → Bipon como puerta de enlace** lo hace con **un solo cable**:
+
+```
+Internet ── router del proveedor (módem + Wi-Fi + switch, sin cambios)
+                 │
+    tus equipos ─┴─ Bipon (puerta de enlace que reparte su DHCP)
+```
+
+1. Comprueba que todo esté listo (IP fija de Bipon, nftables, reenvío…).
+2. Activa el reenvío con **reversión automática a los 60 s** si no confirmas.
+3. Activa el DHCP de Bipon como **principal** (el del router queda de **respaldo**: si Bipon se apaga, los equipos vuelven solos al router en ≤ 30 min).
+
+Para que los juegos tengan **NAT abierto**, pon la IP de Bipon en la **DMZ** del router y crea la redirección de puertos de la consola en Bipon.
 
 ---
 
@@ -243,6 +273,8 @@ Crea un LXC Debian 12 no privilegiado (2 CPU, 1 GB, 8 GB), habilita **TUN** para
 | Se cuelan anuncios | DNS secundario externo en el router o DNS cifrado del navegador: activa «Evitar DNS cifrado del navegador». |
 | No se ven dispositivos | Docker necesita `network_mode: host`; en Proxmox el LXC debe estar en el mismo puente/VLAN. |
 | «Permisos de red limitados» | Falta `/dev/net/tun`: *VPN → Activar TUN* (vía Proxmox) o las líneas `lxc.*` de arriba. |
+| Algo no funciona y no sabes qué | *Ajustes → Registros*: eventos, registro de la aplicación y de Unbound, con filtros. |
+| Una web o app dejó de funcionar | *Bloqueo* muestra «¿Algo dejó de funcionar?» con los dominios bloqueados que se están reintentando. |
 | Los horarios no cuadran | Ajusta la zona horaria en *Ajustes* o `TZ`. |
 
 ---
