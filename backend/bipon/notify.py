@@ -173,8 +173,11 @@ class Notifier:
         h = self.http()
         if t == "telegram":
             text = f"{icon} <b>{html.escape(title)}</b>\n{html.escape(message)}"
-            r = await h.post(f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage",
-                             json={"chat_id": cfg["chat_id"], "text": text, "parse_mode": "HTML", "disable_web_page_preview": True})
+            payload = {"chat_id": cfg["chat_id"], "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
+            kb = telegram_buttons(event, data) if cfg.get("buttons", True) else None
+            if kb:
+                payload["reply_markup"] = {"inline_keyboard": kb}
+            r = await h.post(f"https://api.telegram.org/bot{cfg['bot_token']}/sendMessage", json=payload)
         elif t == "discord":
             color = {"high": 0xEF4444, "default": 0x3B82F6, "low": 0x64748B}.get(meta.get("priority"), 0x3B82F6)
             r = await h.post(cfg["webhook_url"], json={"username": "Bipon Net", "embeds": [{"title": f"{icon} {title}", "description": message, "color": color,
@@ -253,3 +256,106 @@ class Notifier:
     async def close(self):
         if self._http:
             await self._http.aclose()
+
+
+# =====================================================================
+# Telegram con botones: Permitir / Bloquear desde el propio aviso
+# =====================================================================
+def telegram_buttons(event: str, data: dict) -> list | None:
+    mac = (data or {}).get("mac")
+    if not mac or len(mac) > 40:
+        return None
+    if event == "device_new":
+        return [[{"text": "✅ Permitir", "callback_data": f"allow:{mac}"}, {"text": "⛔ Bloquear Internet", "callback_data": f"block:{mac}"}]]
+    if event == "quarantine":
+        return [[{"text": "🔓 Liberar", "callback_data": f"release:{mac}"}, {"text": "⛔ Mantener bloqueado", "callback_data": f"block:{mac}"}]]
+    return None
+
+
+class TelegramBot:
+    """Recibe las pulsaciones de los botones (getUpdates, sin abrir puertos ni webhooks).
+    Sólo se aceptan las que vienen del chat configurado en el canal."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self.offsets: dict[str, int] = {}
+        self.last_error = ""
+
+    def _channels(self) -> list[dict]:
+        chans = (self.ctx.notify.cfg().get("channels") or [])
+        return [c for c in chans if c.get("type") == "telegram" and c.get("enabled", True)
+                and (c.get("config") or {}).get("bot_token") and (c.get("config") or {}).get("buttons", True)]
+
+    async def handle(self, ch: dict, upd: dict, h: httpx.AsyncClient) -> str | None:
+        cfg = ch["config"]
+        cq = upd.get("callback_query") or {}
+        msg = cq.get("message") or {}
+        if not cq or str((msg.get("chat") or {}).get("id")) != str(cfg.get("chat_id")):
+            return None  # ignorar pulsaciones de otros chats
+        action, _, mac = (cq.get("data") or "").partition(":")
+        who = (cq.get("from") or {}).get("first_name") or "Telegram"
+        devs = self.ctx.devices
+        d = devs.devices.get(mac)
+        api = f"https://api.telegram.org/bot{cfg['bot_token']}"
+        if not d:
+            await h.post(f"{api}/answerCallbackQuery", json={"callback_query_id": cq.get("id"), "text": "Dispositivo no encontrado"})
+            return None
+        name = d.get("name") or d.get("hostname") or d.get("ip") or mac
+        if action == "allow":
+            devs.update(mac, {"paused": 0, "paused_until": 0})
+            cap = getattr(self.ctx, "captive", None)
+            if cap is not None and cap.enabled:
+                cap.allow(mac, trusted=True)
+            result = f"✅ {name} permitido por {who}"
+        elif action == "block":
+            devs.update(mac, {"paused": 1, "paused_until": 0})
+            result = f"⛔ Internet bloqueado a {name} por {who}"
+        elif action == "release":
+            guard = getattr(self.ctx, "guard", None)
+            if guard is not None:
+                guard.release(mac)
+            result = f"🔓 {name} liberado de la cuarentena por {who}"
+        else:
+            return None
+        try:
+            self.ctx.apply_policy_now([mac])
+        except Exception:  # pragma: no cover
+            pass
+        self.ctx.db.event("info", "telegram", result)
+        await h.post(f"{api}/answerCallbackQuery", json={"callback_query_id": cq.get("id"), "text": result[:190]})
+        if msg.get("message_id"):
+            await h.post(f"{api}/editMessageReplyMarkup", json={"chat_id": cfg["chat_id"], "message_id": msg["message_id"], "reply_markup": {"inline_keyboard": []}})
+            await h.post(f"{api}/sendMessage", json={"chat_id": cfg["chat_id"], "text": result, "reply_to_message_id": msg["message_id"]})
+        return result
+
+    async def poll_once(self, ch: dict, h: httpx.AsyncClient, timeout: int = 25) -> int:
+        tok = ch["config"]["bot_token"]
+        r = await h.get(f"https://api.telegram.org/bot{tok}/getUpdates",
+                        params={"timeout": timeout, "offset": self.offsets.get(tok, 0), "allowed_updates": json.dumps(["callback_query"])},
+                        timeout=timeout + 10)
+        data = r.json()
+        if not data.get("ok"):
+            raise RuntimeError(data.get("description") or f"HTTP {r.status_code}")
+        n = 0
+        for upd in data.get("result", []):
+            self.offsets[tok] = upd["update_id"] + 1
+            if await self.handle(ch, upd, h):
+                n += 1
+        return n
+
+    async def loop(self) -> None:
+        backoff = 5
+        async with httpx.AsyncClient(headers={"user-agent": "Bipon Net"}) as h:
+            while True:
+                chans = self._channels()
+                if not chans:
+                    await asyncio.sleep(30)
+                    continue
+                try:
+                    await asyncio.gather(*(self.poll_once(c, h) for c in chans))
+                    backoff, self.last_error = 5, ""
+                except Exception as exc:
+                    self.last_error = str(exc)[:200]
+                    log.debug("telegram: %s", exc)
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 300)
