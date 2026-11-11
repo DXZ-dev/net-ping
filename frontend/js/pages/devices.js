@@ -384,7 +384,8 @@ export async function render(el) {
         }, 10000);
       },
       ports() {
-        pane.innerHTML = `<div class="row mb"><button class="btn sm" id="ps">${ico("search")}${t("Escanear puertos abiertos")}</button><button class="btn sm" id="pg">${ico("activity")}Ping</button><button class="btn sm" id="wol">${ico("power")}${t("Encender (WoL)")}</button></div><div id="pout"></div>`;
+        pane.innerHTML = `<div class="row mb"><button class="btn sm" id="ps">${ico("search")}${t("Escanear puertos abiertos")}</button><button class="btn sm" id="pg">${ico("activity")}Ping</button><button class="btn sm" id="wol">${ico("power")}${t("Encender (WoL)")}</button></div><div id="pout"></div>
+          <div class="card flat mt" id="pw-box"></div>`;
         const out = pane.querySelector("#pout");
         pane.querySelector("#ps").onclick = (e) => busy(e.currentTarget, async () => {
           out.innerHTML = `<p class="muted small">${t("Escaneando puertos comunes…")}</p>`;
@@ -397,6 +398,7 @@ export async function render(el) {
           out.innerHTML = r.received ? `<div class="alert ok">${ico("check")}<div>${ms(r.avg)} (${t("mín")} ${ms(r.min)}, ${t("máx")} ${ms(r.max)}, jitter ${ms(r.jitter)}) · ${t("pérdida")} ${r.loss}%</div></div>` : `<div class="alert warn">${ico("alert")}<div>${t("No responde a ping.")}</div></div>`;
         }).catch(() => {});
         pane.querySelector("#wol").onclick = (e) => busy(e.currentTarget, () => api.post(`/devices/${encodeURIComponent(mac)}/wake`)).then(() => toast(t("Paquete mágico enviado"))).catch(() => {});
+        drawPower(pane.querySelector("#pw-box"), mac);
       },
       cfg() {
         const others = data.devices.filter((x) => x.mac !== mac);
@@ -437,4 +439,38 @@ export async function render(el) {
   const onResize = () => view === "map" && draw();
   window.addEventListener("resize", onResize);
   return () => { clearInterval(timer); window.removeEventListener("resize", onResize); try { es?.cancel?.(); } catch {} es = "closed"; };
+}
+
+// Encender / apagar un dispositivo según su marca (WoL, Home Assistant, SSH, Shelly)
+async function drawPower(box, mac) {
+  if (!box) return;
+  const p = await api.get(`/devices/${encodeURIComponent(mac)}/power`).catch(() => null);
+  if (!p) { box.remove(); return; }
+  const L = p.labels, cfg = p.config || {};
+  const method = cfg.method || p.suggest[0] || "wol";
+  const sel = (m) => `<option value="${m}" ${method === m ? "selected" : ""}>${esc(t(L[m] || m))}</option>`;
+  box.innerHTML = `<header><h4>${ico("power")}${t("Encendido y apagado")}</h4></header>
+    <p class="small muted mb">${t("WoL enciende equipos con Wake-on-LAN. Para apagar de verdad hace falta un enchufe inteligente (Home Assistant), SSH (PC) o un Shelly.")}</p>
+    <label class="field">${t("Método")}<select id="pw-m">${["wol", "ha", "ssh", "http"].map(sel).join("")}</select></label>
+    <div id="pw-extra"></div>
+    <div class="row mt"><button class="btn sm" id="pw-save">${ico("check")}${t("Guardar")}</button>
+      <button class="btn sm success" id="pw-on">${ico("power")}${t("Encender")}</button>
+      <button class="btn sm danger" id="pw-off">${ico("power")}${t("Apagar")}</button></div>
+    <p class="small muted mt">${t("Sugerido para esta marca")}: ${p.suggest.map((x) => esc(t(L[x] || x))).join(", ")}</p>`;
+  const extra = box.querySelector("#pw-extra");
+  const drawExtra = (m) => {
+    extra.innerHTML = m === "ha" ? `<label class="field mt">${t("Entidad de Home Assistant")}<input id="pw-ent" value="${esc(cfg.ha_entity || "")}" placeholder="switch.enchufe_tv"></label>`
+      : m === "ssh" ? `<div class="form-grid mt"><label class="field">${t("Host SSH")}<input id="pw-host" value="${esc(cfg.ssh_host || "")}" placeholder="${t("IP del equipo")}"></label>
+          <label class="field">${t("Usuario")}<input id="pw-user" value="${esc(cfg.ssh_user || "root")}"></label></div><p class="small muted">${t("Usa la clave SSH de Bipon; el usuario debe poder apagar con sudo sin contraseña.")}</p>`
+      : m === "http" ? `<p class="small muted mt">${t("Shelly: se usa su IP directamente (http://IP/relay/0).")}</p>` : `<p class="small muted mt">${t("Wake-on-LAN no necesita configuración, pero el equipo debe tenerlo activado en la BIOS/tarjeta de red.")}</p>`;
+  };
+  drawExtra(method);
+  box.querySelector("#pw-m").onchange = (e) => drawExtra(e.target.value);
+  box.querySelector("#pw-save").onclick = (e) => {
+    const m = box.querySelector("#pw-m").value;
+    const body = { method: m, ha_entity: box.querySelector("#pw-ent")?.value, ssh_host: box.querySelector("#pw-host")?.value, ssh_user: box.querySelector("#pw-user")?.value };
+    busy(e.currentTarget, () => api.put(`/devices/${encodeURIComponent(mac)}/power`, body)).then(() => toast(t("Guardado"))).catch(() => {});
+  };
+  box.querySelector("#pw-on").onclick = (e) => busy(e.currentTarget, () => api.post(`/devices/${encodeURIComponent(mac)}/power/on`)).then((r) => toast(r.message || t("Hecho"))).catch(() => {});
+  box.querySelector("#pw-off").onclick = (e) => busy(e.currentTarget, () => api.post(`/devices/${encodeURIComponent(mac)}/power/off`)).then((r) => toast(r.message || t("Hecho"))).catch(() => {});
 }

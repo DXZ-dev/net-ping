@@ -76,6 +76,8 @@ class Context:
         self.lag = LagGuard(self)
         from .cacheguard import CacheGuard
         self.cacheguard = CacheGuard(self)
+        from .power import PowerControl
+        self.power = PowerControl(self)
         self.routerctl = RouterControl(self)
         self.configs = ConfigProfiles(self)
         self.updater = Updater(self)

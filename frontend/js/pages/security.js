@@ -43,7 +43,9 @@ export async function render(el, app) {
         <p class="muted small mb">${t("Bloquea las conexiones a servidores alojados en los países que elijas (base de datos GeoIP DB-IP, se descarga automáticamente).")}
           ${s.geo.loaded ? `<span class="badge ok">${t("GeoIP cargada")} · ${s.geo.ranges.toLocaleString()} ${t("rangos")}</span>` : `<span class="badge">${t("GeoIP se descargará al activar un país")}</span>`}</p>
         <div class="chips">${Object.entries(s.countries).map(([code, name]) => `<span class="chip ${countries.has(code) ? "on" : ""}" data-cc="${code}">${esc(countryName(code, name))}</span>`).join("")}</div></div>
-    </div>`;
+    </div>
+    <div class="card mt" id="intruders"></div>`;
+  drawIntruders(el.querySelector("#intruders"));
 
   const save = (patch, msg = t("Guardado")) => api.put("/security", patch).then(() => { toast(msg); app.reload(); }).catch(toastErr);
   el.querySelector("#scan").onclick = (e) => busy(e.currentTarget, async () => { const r = await api.post("/security/scan"); toast(r.length ? `${r.length} ${t("anomalías nuevas")}` : t("Sin anomalías nuevas")); app.reload(); }).catch(() => {});
@@ -57,3 +59,20 @@ export async function render(el, app) {
 
 const stat = (l, v, tint, icon) => `<div class="card stat"><div class="ic tint-${tint}">${ico(icon)}</div><div><div class="v">${esc(v)}</div><div class="l">${t(l)}</div></div></div>`;
 const opt = (k, ti, d, v) => `<div class="opt"><div class="t"><b>${t(ti)}</b><span>${t(d)}</span></div>${toggle(k, v, `data-opt="${k}"`)}</div>`;
+
+// Equipos conectados a tu línea con IP fuera de tu red local (IP fija para escaparse, otra VLAN, intruso)
+async function drawIntruders(box) {
+  if (!box) return;
+  const s = await api.get("/intruders").catch(() => null);
+  if (!s) { box.remove(); return; }
+  box.innerHTML = `<header><h2>${ico("alert")}${t("Equipos con IP fuera de tu red")}</h2></header>
+    <p class="muted small mb">${t("Dispositivos presentes en tu línea cuya IP no pertenece a tu red local")} (${s.local_networks.join(", ") || "—"}): ${t("una IP fija puesta a mano para saltarse el control, otra VLAN o un equipo colado.")}
+      ${s.router_mode ? "" : `<br>${t("Para cortarles Internet activa el modo router (Bipon como puerta de enlace).")}`}</p>
+    ${s.intruders.length ? `<div class="table-wrap"><table><thead><tr><th></th><th>${t("Dispositivo")}</th><th>IP</th><th>${t("Marca")}</th><th></th></tr></thead><tbody>
+      ${s.intruders.map((d) => `<tr><td><span class="dot ${d.blocked ? "dot-err" : d.online ? "dot-ok" : "dot-off"}"></span></td>
+        <td><b>${esc(d.name || "—")}</b></td><td class="mono small">${esc(d.ip)}<div class="small muted">${esc(d.mac)}</div></td><td class="small">${esc(d.brand || "")}</td>
+        <td class="actions nowrap">${d.blocked ? `<button class="btn sm success" data-unblock="${esc(d.mac)}">${ico("check")}${t("Permitir")}</button>` : `<button class="btn sm danger" data-block="${esc(d.mac)}" ${s.can_block ? "" : "disabled"}>${ico("x")}${t("Cortar Internet")}</button>`}</td></tr>`).join("")}</tbody></table></div>`
+    : `<p class="muted small">${t("Ninguno: todos tus equipos usan una IP de tu red local.")}</p>`}`;
+  on(box, "click", "[data-block]", (e, b) => busy(b, () => api.post(`/intruders/${encodeURIComponent(b.dataset.block)}/block`, { block: true })).then((r) => { toast(r.enforced ? t("Internet cortado") : t("Guardado (se cortará al activar el modo router)"), r.enforced ? "ok" : "info", 7000); drawIntruders(box); }).catch(() => {}));
+  on(box, "click", "[data-unblock]", (e, b) => busy(b, () => api.post(`/intruders/${encodeURIComponent(b.dataset.unblock)}/block`, { block: false })).then(() => { toast(t("Internet restablecido")); drawIntruders(box); }).catch(() => {}));
+}

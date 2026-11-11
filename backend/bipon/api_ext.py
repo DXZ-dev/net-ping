@@ -818,6 +818,135 @@ async def cacheguard_clean(request: Request):
     return c.cacheguard.status()
 
 
+# =====================================================================
+# Intrusos: equipos conectados a tu línea con IP fuera de tu red local
+# =====================================================================
+@api.get("/intruders")
+async def intruders(request: Request):
+    """Dispositivos presentes en tu red (ARP) cuya IP NO está en ninguna de tus subredes locales:
+    IP fija puesta a mano para escapar del control, otra VLAN, o un equipo colado."""
+    import ipaddress
+    from . import netinfo
+    c = ctx(request)
+    nets = []
+    for itf in netinfo.interfaces():
+        try:
+            nets.append(ipaddress.ip_network(itf["network"], strict=False))
+        except ValueError:
+            pass
+    extra = c.settings.get("devices.subnets") or []
+    for sn in extra:
+        try:
+            nets.append(ipaddress.ip_network(sn, strict=False))
+        except ValueError:
+            pass
+    router_on = bool(c.router.cfg().get("enabled"))
+    out = []
+    for mac, d in c.devices.devices.items():
+        ip = d.get("ip")
+        if not ip or mac.startswith("ip:") or ":" in ip:
+            continue
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        if any(addr in n for n in nets):
+            continue
+        pol = c.devices.policy_for(ip)
+        out.append({"mac": mac, "ip": ip, "name": d.get("name") or d.get("friendly") or d.get("hostname") or "",
+                    "brand": d.get("brand_name") or d.get("vendor") or "", "online": bool(d.get("online")),
+                    "blocked": bool(pol and pol.block_all), "first_seen": d.get("first_seen"), "last_seen": d.get("last_seen")})
+    out.sort(key=lambda x: (not x["online"], x["ip"]))
+    return {"intruders": out, "local_networks": [str(n) for n in nets], "router_mode": router_on,
+            "can_block": router_on}
+
+
+@api.post("/intruders/{mac}/block")
+async def intruder_block(request: Request, mac: str, body: dict = Body(default={})):
+    c = ctx(request)
+    d = c.devices.devices.get(mac)
+    if not d:
+        raise HTTPException(404, "Dispositivo no encontrado")
+    block = bool(body.get("block", True))
+    c.devices.update(mac, {"paused": 1 if block else 0, "paused_until": 0})
+    c.apply_policy_now([mac])
+    c.db.event("warning" if block else "info", "intrusos",
+               f"{'Internet cortado a' if block else 'Internet restablecido a'} intruso {d.get('ip')} ({mac})")
+    return {"ok": True, "blocked": block, "enforced": bool(c.router.cfg().get("enabled"))}
+
+
+# =====================================================================
+# Encender / apagar dispositivos
+# =====================================================================
+@api.get("/devices/{mac}/power")
+async def power_caps(request: Request, mac: str):
+    c = ctx(request)
+    if mac not in c.devices.devices:
+        raise HTTPException(404, "Dispositivo no encontrado")
+    return {**c.power.capabilities(mac), "config": c.power.config_for(mac) | ({"password": "••••••"} if c.power.config_for(mac).get("password") else {})}
+
+
+@api.put("/devices/{mac}/power")
+async def power_config(request: Request, mac: str, body: dict = Body(...)):
+    c = ctx(request)
+    if mac not in c.devices.devices:
+        raise HTTPException(404, "Dispositivo no encontrado")
+    saved = c.power.set_config(mac, body)
+    return {"ok": True, "config": saved, **c.power.capabilities(mac)}
+
+
+@api.post("/devices/{mac}/power/{action}")
+async def power_action(request: Request, mac: str, action: str):
+    c = ctx(request)
+    if mac not in c.devices.devices:
+        raise HTTPException(404, "Dispositivo no encontrado")
+    if action not in ("on", "off"):
+        raise HTTPException(404)
+    try:
+        return await c.power.power(mac, action == "on")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(400, str(exc)[:200])
+
+
+# =====================================================================
+# Home Assistant: conexión para encender/apagar (además del YAML de sensores)
+# =====================================================================
+@api.get("/integrations/homeassistant")
+async def ha_get(request: Request):
+    ha = (ctx(request).settings.get("integrations") or {}).get("homeassistant") or {}
+    return {"config": {**ha, "token": "••••••" if ha.get("token") else ""}}
+
+
+@api.put("/integrations/homeassistant")
+async def ha_put(request: Request, body: dict = Body(...)):
+    import httpx
+    c = ctx(request)
+    integ = c.settings.get("integrations") or {}
+    old = integ.get("homeassistant") or {}
+    url = str(body.get("url", old.get("url", ""))).rstrip("/")
+    if url and not url.startswith(("http://", "https://")):
+        raise HTTPException(400, "La URL debe empezar por http:// o https://")
+    token = body.get("token")
+    if token in (None, "", "••••••"):
+        token = old.get("token")
+    new = {"url": url, "token": token, "verify_tls": bool(body.get("verify_tls", old.get("verify_tls", True)))}
+    integ["homeassistant"] = new
+    c.settings.set("integrations", integ, notify=False)
+    if url and token:
+        try:
+            async with httpx.AsyncClient(verify=new["verify_tls"], timeout=8, headers={"Authorization": f"Bearer {token}"}) as h:
+                r = await h.get(url + "/api/")
+            if r.status_code >= 300:
+                raise HTTPException(400, f"Home Assistant respondió HTTP {r.status_code} (revisa la URL y el token)")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(400, f"No se pudo conectar: {str(exc)[:160]}")
+    return {"ok": True, "connected": bool(url and token)}
+
+
 @api.get("/speedctl")
 async def speedctl_get(request: Request):
     """Método con el que se limitaría la velocidad de cada dispositivo."""

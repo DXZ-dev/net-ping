@@ -28,6 +28,11 @@ export async function render(el, app) {
       <ol class="steps small"><li>${t("Crea un token de sólo lectura en Usuarios y acceso → Tokens de API (o «Administrador» si quieres usar los interruptores).")}</li>
         <li>${t("Descarga la configuración y pégala en configuration.yaml, sustituyendo TU_TOKEN_DE_BIPON.")}</li><li>${t("Reinicia Home Assistant.")}</li></ol>
       <div class="row mt"><button class="btn" id="ha-dl">${ico("download")}${t("Descargar configuración")}</button><button class="btn" id="ha-cp">${ico("copy")}${t("Copiar")}</button></div>
+      <div class="card flat mt" id="ha-conn"><header><h4>${ico("power")}${t("Encender / apagar desde Bipon")}</h4></header>
+        <p class="small muted mb">${t("Conecta tu Home Assistant para que Bipon pueda encender y apagar enchufes, bombillas y aparatos inteligentes desde la ficha de cada dispositivo.")}</p>
+        <label class="field">${t("URL de Home Assistant")}<input id="ha-url" placeholder="http://192.168.1.10:8123"></label>
+        <label class="field mt">${t("Token de acceso de larga duración")}<input type="password" id="ha-tok" autocomplete="new-password" placeholder="${t("Perfil → Tokens de larga duración")}"></label>
+        <button class="btn sm mt" id="ha-save">${ico("link")}${t("Conectar")}</button></div>
       <p class="small muted mt">${t("También puedes usar los webhooks de Notificaciones para disparar automatizaciones.")}</p></div></div>
     ${inv.length ? `<div class="card mt"><header><h3>${ico("server")}${t("Inventario de Proxmox")}</h3></header><div class="table-wrap"><table><thead><tr><th>${t("Nombre")}</th><th>${t("Tipo")}</th><th>ID</th><th>${t("Nodo")}</th><th>MAC</th><th>${t("Estado")}</th></tr></thead><tbody>
       ${inv.map(([mac, v]) => `<tr><td><b>${esc(v.name || "")}</b></td><td>${v.type === "lxc" ? "LXC" : "VM"}</td><td>${v.vmid}</td><td>${esc(v.node)} <span class="muted small">${esc(v.node_ip || "")}</span></td><td class="mono small">${esc(mac)}</td>
@@ -74,6 +79,9 @@ export async function render(el, app) {
   const yaml = () => api("/integrations/config/ha.yaml");
   el.querySelector("#ha-dl").onclick = async () => download("bipon-home-assistant.yaml", await yaml());
   el.querySelector("#ha-cp").onclick = async () => copy(await yaml());
+  api.get("/integrations/homeassistant").then((h) => { if (h.config.url) el.querySelector("#ha-url").value = h.config.url; if (h.config.token) el.querySelector("#ha-tok").value = ""; }).catch(() => {});
+  el.querySelector("#ha-save").onclick = (e) => busy(e.currentTarget, () => api.put("/integrations/homeassistant", { url: el.querySelector("#ha-url").value.trim(), token: el.querySelector("#ha-tok").value }))
+    .then((r) => toast(r.connected ? t("Home Assistant conectado") : t("Guardado"))).catch(() => {});
   const sf = el.querySelector("#syf");
   sf.onsubmit = (e) => { e.preventDefault(); busy(sf.querySelector(".primary"), () => api.put("/sync", { role: sf.role.value, primary_url: sf.primary_url.value.trim(), token: sf.token.value, interval: Number(sf.interval.value) })).then(() => toast(t("Guardado"))).catch(() => {}); };
   el.querySelector("#sync-now").onclick = (e) => busy(e.currentTarget, () => api.post("/sync/now")).then((r) => toast(`${t("Sincronizado")}: ${r.rules} ${t("reglas")}, ${r.lists} ${t("listas")}, ${r.devices} ${t("dispositivos")}`)).catch(() => {});

@@ -869,6 +869,43 @@ async def unbound_put(request: Request, body: dict = Body(...)):
     return {"ok": True, "message": msg}
 
 
+@api.get("/unbound/recommend")
+async def unbound_recommend(request: Request):
+    """Mejor configuración de Unbound para el hardware de este equipo."""
+    from .unbound import recommend_config
+    c = ctx(request)
+    mem = {}
+    for line in _read_proc("/proc/meminfo").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].rstrip(":") == "MemTotal":
+            mem["total"] = int(parts[1]) * 1024
+    r = recommend_config(c.settings.get("unbound"), os.cpu_count() or 1, mem.get("total", 0))
+    cur = c.settings.get("unbound")
+    diff = {k: {"from": cur.get(k), "to": v} for k, v in r["config"].items() if cur.get(k) != v}
+    return {"recommended": r["config"], "reasons": r["reasons"], "changes": diff,
+            "hardware": {"cpus": os.cpu_count(), "mem_total": mem.get("total", 0)}}
+
+
+@api.post("/unbound/optimize")
+async def unbound_optimize(request: Request):
+    """Aplica la configuración óptima de Unbound para el hardware."""
+    from .unbound import recommend_config
+    c = ctx(request)
+    mem = {}
+    for line in _read_proc("/proc/meminfo").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].rstrip(":") == "MemTotal":
+            mem["total"] = int(parts[1]) * 1024
+    rec = recommend_config(c.settings.get("unbound"), os.cpu_count() or 1, mem.get("total", 0))["config"]
+    ok, msg = await c.unbound.apply(rec)
+    if not ok:
+        raise HTTPException(400, msg)
+    c.settings.set("unbound", rec, notify=False)
+    c.apply_dns_settings()
+    c.db.event("info", "unbound", "Unbound optimizado automáticamente para el hardware")
+    return {"ok": True, "message": "Unbound optimizado: " + msg}
+
+
 @api.post("/unbound/{action}")
 async def unbound_action(request: Request, action: str):
     c = ctx(request)

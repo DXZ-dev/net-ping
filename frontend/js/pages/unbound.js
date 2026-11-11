@@ -58,6 +58,9 @@ export async function render(el, app) {
       </form>
       <div class="col">
         <div class="card" id="cg"></div>
+        <div class="card"><header><h3>${ico("zap")}Optimización automática</h3></header>
+          <p class="small muted mb">Ajusta hilos y tamaños de caché al hardware de este equipo, y activa prefetch, serve-expired y los endurecimientos recomendados.</p>
+          <button class="btn primary" id="opt-ub">${ico("zap")}Optimizar para mi hardware</button></div>
         <div class="card"><header><h3>${ico("power")}Acciones</h3></header>
           <div class="col">
             <button class="btn" data-a="restart">${ico("refresh")}Reiniciar Unbound</button>
@@ -73,6 +76,16 @@ export async function render(el, app) {
     </div>`;
 
   drawGuard(el.querySelector("#cg"));
+  el.querySelector("#opt-ub").onclick = async (e) => {
+    const r = await api.get("/unbound/recommend").catch(() => null);
+    if (!r) return;
+    const rows = Object.entries(r.changes).map(([k, v]) => `<tr><td class="mono small">${esc(k)}</td><td class="small muted">${esc(String(v.from))}</td><td class="small">→ ${esc(String(v.to))}</td></tr>`).join("");
+    modal({ title: "Optimizar Unbound", wide: true,
+      body: `<p class="small muted">Hardware detectado: ${r.hardware.cpus} CPU · ${bytes(r.hardware.mem_total)} RAM.</p>
+        <ul class="small">${r.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
+        ${rows ? `<h4 class="mt mb">Cambios</h4><div class="table-wrap"><table><tbody>${rows}</tbody></table></div>` : `<p class="small">Ya tienes la configuración óptima.</p>`}`,
+      actions: [{ label: "Cancelar" }, { label: "Aplicar", kind: "primary", onClick: async () => { await api.post("/unbound/optimize"); toast("Unbound optimizado"); setTimeout(() => app.reload(), 1200); } }] });
+  };
   const f = el.querySelector("#uf");
   f.querySelectorAll("[name=mode]").forEach((r) => r.onchange = () => el.querySelector("#fwd").classList.toggle("hidden", r.value === "recursive" && r.checked));
   f.querySelectorAll("[data-fwd]").forEach((b) => b.onclick = () => { f.forward_servers.value = b.dataset.fwd.split(" ").join("\n"); });

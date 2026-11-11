@@ -290,3 +290,40 @@ class UnboundManager:
             "config_path": str(self.conf),
             "binary": shutil.which(UNBOUND_BIN),
         }
+
+
+def recommend_config(current: dict, cpus: int, mem_bytes: int) -> dict:
+    """Mejor configuración de Unbound para el hardware: hilos, slabs y tamaños de caché según CPU y RAM,
+    más los endurecimientos y velocidades recomendados. No toca el modo ni los servidores de reenvío."""
+    cpus = max(1, int(cpus or 1))
+    mem_mb = max(256, int((mem_bytes or 0) / (1024 * 1024)))
+    threads = max(1, min(cpus, 8))
+    # la caché puede usar hasta ~1/8 de la RAM para msg y ~1/4 para rrset, con topes sensatos por equipo
+    rrset_mb = max(32, min(512, mem_mb // 4))
+    msg_mb = max(16, min(256, rrset_mb // 2))
+    rec = {
+        **current,
+        "num_threads": threads,
+        "msg_cache_size": f"{msg_mb}m",
+        "rrset_cache_size": f"{rrset_mb}m",
+        "so_rcvbuf": "4m" if mem_mb >= 1024 else "1m",
+        "edns_buffer_size": 1232,          # evita fragmentación/pérdidas en la mayoría de redes
+        "cache_min_ttl": 60,               # menos recursión para dominios que ponen TTL muy bajo
+        "cache_max_ttl": 86400,
+        "prefetch": True, "prefetch_key": True,
+        "serve_expired": True, "serve_expired_ttl": 86400, "serve_expired_client_timeout": 1800,
+        "qname_minimisation": True, "aggressive_nsec": True,
+        "hide_identity": True, "harden_glue": True, "harden_dnssec_stripped": True,
+        "dnssec": True, "rebind_protection": True,
+        "use_caps_for_id": False,          # algunos autoritativos antiguos fallan con 0x20
+        "do_ip6": bool(current.get("do_ip6", False)),
+    }
+    reasons = [
+        f"{threads} hilo(s) para {cpus} CPU",
+        f"caché de mensajes {msg_mb} MB y de registros {rrset_mb} MB para {mem_mb} MB de RAM",
+        "prefetch + serve-expired: respuestas desde memoria sin espera",
+        "EDNS 1232 para evitar fragmentación",
+        "TTL mínimo 60 s para reducir recursión",
+        "DNSSEC y endurecimientos activados",
+    ]
+    return {"config": rec, "reasons": reasons}

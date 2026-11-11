@@ -19,6 +19,8 @@ const ENTRIES = [
   ["Comprobar dominio", "blocking", "check", null, "por qué se bloquea"],
   ["Seguridad", "security", null, null, "amenazas malware"],
   ["Detección de anomalías", "security", null, "Anomalías detectadas", "dga tunel malware"],
+  ["Equipos con IP fuera de tu red", "security", null, "Equipos con IP fuera de tu red", "intruso intrusos ip fija colado vlan"],
+  ["Optimizar Unbound", "unbound", null, "Optimización automática", "unbound optimizar hardware hilos cache"],
   ["Bloquear servidores por país", "security", null, "Bloquear servidores por país", "geoip pais"],
   ["Bloquear dominios de primer nivel (TLD)", "security", null, "Bloquear dominios de primer nivel (TLD)", "tld"],
   ["Protecciones", "security", null, "Protecciones", "rebinding private relay doh"],
