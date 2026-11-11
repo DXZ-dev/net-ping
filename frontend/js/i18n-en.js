@@ -1840,7 +1840,19 @@ export const EN = {
   "Algunas apps no arrancan sin él": "Some apps won't start without it",
   "Apps Android con Firebase": "Android apps with Firebase",
   "Actualizaciones y funciones de Microsoft Edge": "Microsoft Edge updates and features",
-  "Inicio de sesión de Microsoft": "Microsoft sign-in"
+  "Inicio de sesión de Microsoft": "Microsoft sign-in",
+  "Copias automáticas": "Automatic backups",
+  "Bipon guarda solo una copia de tu configuración, reglas, listas y dispositivos. Si algo se rompe, vuelves atrás con un clic.": "Bipon saves a copy of your configuration, rules, lists and devices on its own. If something breaks, you go back with one click.",
+  "Frecuencia": "Frequency",
+  "Conservar las últimas": "Keep the last",
+  "Copiar también a (opcional: disco o NAS montado)": "Also copy to (optional: mounted disk or NAS)",
+  "Hacer copia ahora": "Back up now",
+  "auto": "auto",
+  "Restaurar": "Restore",
+  "Aún no hay copias.": "No backups yet.",
+  "Copia creada": "Backup created",
+  "Restaurar copia": "Restore backup",
+  "Se guardará antes una copia del estado actual. ¿Restaurar esta copia?": "A copy of the current state will be saved first. Restore this backup?"
 };
 
 export const EN_PATTERNS = [

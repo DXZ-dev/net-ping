@@ -1383,34 +1383,89 @@ async def settings_put(request: Request, body: dict = Body(...)):
 
 @api.get("/backup")
 async def backup(request: Request):
-    c = ctx(request)
-    data = {"version": __version__, "created": time.time(), "settings": c.settings.export(),
-            "rules": await c.db.aquery("SELECT value,kind,comment,enabled FROM domain_rules"),
-            "lists": await c.db.aquery("SELECT url,name,category,enabled FROM blocklists"),
-            "devices": await c.db.aquery("SELECT mac,name,kind,profile,notes FROM devices WHERE name<>'' OR profile<>'default' OR notes<>''")}
+    from . import backups
+    data = await backups.build(ctx(request))
     return Response(json.dumps(data, indent=2, ensure_ascii=False), media_type="application/json",
                     headers={"content-disposition": f"attachment; filename=bipon-backup-{time.strftime('%Y%m%d')}.json"})
 
 
 @api.post("/restore")
 async def restore(request: Request, body: dict = Body(...)):
-    c = ctx(request)
-    if "settings" not in body:
-        raise HTTPException(400, "Copia de seguridad no válida")
-    c.settings.import_(body["settings"])
-    for r in body.get("rules", []):
-        await c.db.aexecute("INSERT OR IGNORE INTO domain_rules(value,kind,comment,enabled,created) VALUES (?,?,?,?,?)",
-                            (r["value"], r["kind"], r.get("comment", ""), r.get("enabled", 1), time.time()))
-    for l in body.get("lists", []):
-        await c.db.aexecute("INSERT OR IGNORE INTO blocklists(url,name,category,enabled) VALUES (?,?,?,?)",
-                            (l["url"], l["name"], l.get("category", "ads"), l.get("enabled", 1)))
-    for d in body.get("devices", []):
-        await c.db.aexecute("INSERT INTO devices(mac,name,kind,profile,notes,first_seen,last_seen) VALUES (?,?,?,?,?,?,?) "
-                            "ON CONFLICT(mac) DO UPDATE SET name=excluded.name, kind=excluded.kind, profile=excluded.profile, notes=excluded.notes",
-                            (d["mac"], d.get("name", ""), d.get("kind", ""), d.get("profile", "default"), d.get("notes", ""), time.time(), 0))
-    c.devices.load()
-    asyncio.create_task(c.lists.update())
+    from . import backups
+    try:
+        await backups.restore(ctx(request), body)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     return {"ok": True}
+
+
+# ---- copias automáticas
+@api.get("/backups")
+async def backups_list(request: Request):
+    from . import backups
+    return {"config": backups.cfg(ctx(request)), "backups": backups.listing(), "dir": str(backups.DIR)}
+
+
+@api.post("/backups")
+async def backups_create(request: Request):
+    from . import backups
+    r = await backups.create(ctx(request))
+    return {**r, "backups": backups.listing()}
+
+
+@api.put("/backups/config")
+async def backups_config(request: Request, body: dict = Body(...)):
+    from pathlib import Path
+    from . import backups
+    c = ctx(request)
+    k = backups.cfg(c)
+    if "enabled" in body:
+        k["enabled"] = bool(body["enabled"])
+    if body.get("every") in ("daily", "weekly"):
+        k["every"] = body["every"]
+    if "keep" in body:
+        k["keep"] = max(1, min(int(body["keep"]), 365))
+    if "copy_to" in body:
+        dest = str(body["copy_to"] or "").strip()
+        if dest and (not dest.startswith("/") or not Path(dest).is_dir()):
+            raise HTTPException(400, "La carpeta extra debe ser una ruta absoluta que exista (p. ej. un disco o NAS montado)")
+        k["copy_to"] = dest
+    c.settings.set("auto_backup", k, notify=False)
+    return {"config": k, "backups": backups.listing()}
+
+
+@api.get("/backups/{name}")
+async def backups_download(request: Request, name: str):
+    from . import backups
+    try:
+        p = backups.path_of(name)
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "Copia no encontrada")
+    return Response(p.read_bytes(), media_type="application/json", headers={"content-disposition": f'attachment; filename="{p.name}"'})
+
+
+@api.post("/backups/{name}/restore")
+async def backups_restore(request: Request, name: str):
+    from . import backups
+    c = ctx(request)
+    try:
+        body = json.loads(backups.path_of(name).read_text())
+        await backups.create(c)  # copia del estado actual antes de restaurar
+        await backups.restore(c, body)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc))
+    c.db.event("warning", "sistema", f"Configuración restaurada desde {name}")
+    return {"ok": True}
+
+
+@api.delete("/backups/{name}")
+async def backups_delete(request: Request, name: str):
+    from . import backups
+    try:
+        backups.path_of(name).unlink()
+    except (ValueError, FileNotFoundError):
+        raise HTTPException(404, "Copia no encontrada")
+    return {"backups": backups.listing()}
 
 
 # =====================================================================

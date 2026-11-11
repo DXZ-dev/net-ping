@@ -243,6 +243,8 @@ class Context:
         self._bg(self.cacheguard.loop(), "guardián de caché")
         self._bg(self.quality.loop(), "calidad de conexión")
         self._bg(self.telegram.loop(), "botones de Telegram")
+        from . import backups
+        self._bg(backups.loop(self), "copias automáticas")
         from . import unbound_auto
         self._bg(unbound_auto.loop(self), "autoajuste de Unbound")
         self._bg(self.unbound.persist_loop(), "caché persistente de Unbound")

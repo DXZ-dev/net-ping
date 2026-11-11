@@ -136,6 +136,7 @@ export async function render(el, app) {
           <p class="muted small">${t("Exporta listas, reglas, perfiles, nombres de dispositivos y configuración (sin contraseñas ni claves VPN).")}</p>
           <div class="row mt"><a class="btn primary" href="/api/backup">${ico("download")}${t("Descargar copia")}</a><label class="btn">${ico("upload")}${t("Restaurar…")}<input type="file" accept=".json" id="restore" class="hidden"></label>
             <a class="btn" href="/api/export/queries.csv">${ico("download")}${t("Exportar consultas (CSV)")}</a></div></div>
+          <div class="card" id="autobk"></div>
           <div class="card"><header><h2>${ico("trash")}${t("Borrar datos")}</h2></header>
             <p class="muted small mb">${t("Acciones irreversibles. La configuración, las listas y los perfiles no se tocan.")}</p>
             <div class="col">
@@ -145,6 +146,7 @@ export async function render(el, app) {
             <p class="small muted mt">${t("«Borrar dispositivos conocidos» es ideal tras cambiar la clave del Wi-Fi/router: se vacía la lista y solo reaparecen los equipos que se reconecten con la clave nueva.")}</p></div>
           <div class="card"><header><h2>${ico("info")}${t("Acerca de")}</h2></header><dl class="kv"><dt>${t("Versión")}</dt><dd>Bipon Net ${esc(sys.version)}</dd><dt>${t("Sistema")}</dt><dd>${esc(sys.platform)}</dd>
             <dt>Python</dt><dd>${esc(sys.python)}</dd><dt>${t("IP del servidor")}</dt><dd>${esc(sys.ip || "")}</dd><dt>${t("Puerto DNS")}</dt><dd>${esc(sys.dns.port)}</dd><dt>API</dt><dd><a href="/api/docs" target="_blank" rel="noopener">/api/docs</a></dd></dl></div></div>`;
+      drawAutoBackup(pane.querySelector("#autobk"));
       const reset = (what, title, msg) => async () => {
         if (!(await confirmDialog(title, msg))) return;
         const r = await api.post("/system/reset", { what }).catch(toastErr);
@@ -218,4 +220,33 @@ export async function render(el, app) {
     },
   };
   show();
+}
+
+// Copias de seguridad automáticas
+async function drawAutoBackup(box) {
+  if (!box) return;
+  const r = await api.get("/backups").catch(() => null);
+  if (!r) { box.remove(); return; }
+  const k = r.config;
+  const kb = (n) => (n / 1024).toFixed(1) + " KB";
+  box.innerHTML = `<header><h2>${ico("clock")}${t("Copias automáticas")}</h2>${toggle("bk-on", k.enabled)}</header>
+    <p class="muted small mb">${t("Bipon guarda solo una copia de tu configuración, reglas, listas y dispositivos. Si algo se rompe, vuelves atrás con un clic.")}</p>
+    <div class="form-grid"><label class="field">${t("Frecuencia")}<select id="bk-every"><option value="daily" ${k.every === "daily" ? "selected" : ""}>${t("Cada día")}</option><option value="weekly" ${k.every === "weekly" ? "selected" : ""}>${t("Cada semana")}</option></select></label>
+      <label class="field">${t("Conservar las últimas")}<input type="number" id="bk-keep" min="1" max="365" value="${k.keep}"></label></div>
+    <label class="field mt">${t("Copiar también a (opcional: disco o NAS montado)")}<input id="bk-copy" value="${esc(k.copy_to || "")}" placeholder="/mnt/nas/bipon"></label>
+    <div class="row mt"><button class="btn sm" id="bk-save">${ico("check")}${t("Guardar")}</button><button class="btn sm primary" id="bk-now">${ico("download")}${t("Hacer copia ahora")}</button></div>
+    ${r.backups.length ? `<div class="table-wrap mt" style="max-height:260px;overflow:auto"><table><tbody>${r.backups.map((b) => `<tr><td class="small">${new Date(b.ts * 1000).toLocaleString()} ${b.auto ? `<span class="badge">${t("auto")}</span>` : ""}</td><td class="small muted">${kb(b.size)}</td>
+      <td class="actions nowrap"><a class="icon-btn" href="/api/backups/${encodeURIComponent(b.name)}" title="${t("Descargar")}">${ico("download")}</a>
+        <button class="btn sm" data-bkr="${esc(b.name)}">${t("Restaurar")}</button><button class="icon-btn" data-bkd="${esc(b.name)}" title="${t("Eliminar")}">${ico("trash")}</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="small muted mt">${t("Aún no hay copias.")}</p>`}`;
+  const save = () => busy(box.querySelector("#bk-save"), () => api.put("/backups/config", { enabled: box.querySelector("[name=bk-on]").checked, every: box.querySelector("#bk-every").value,
+    keep: Number(box.querySelector("#bk-keep").value) || 14, copy_to: box.querySelector("#bk-copy").value.trim() })).then(() => toast(t("Guardado"))).catch(() => {});
+  box.querySelector("#bk-save").onclick = save;
+  box.querySelector("[name=bk-on]").onchange = save;
+  box.querySelector("#bk-now").onclick = (e) => busy(e.currentTarget, () => api.post("/backups")).then((x) => { toast(`${t("Copia creada")}${x.copied_to ? " · " + x.copied_to : ""}`); drawAutoBackup(box); }).catch(() => {});
+  box.querySelectorAll("[data-bkr]").forEach((b) => b.onclick = async () => {
+    if (!(await confirmDialog(t("Restaurar copia"), t("Se guardará antes una copia del estado actual. ¿Restaurar esta copia?")))) return;
+    busy(b, () => api.post(`/backups/${encodeURIComponent(b.dataset.bkr)}/restore`)).then(() => toast(t("Copia restaurada"))).catch(() => {});
+  });
+  box.querySelectorAll("[data-bkd]").forEach((b) => b.onclick = () => api.del(`/backups/${encodeURIComponent(b.dataset.bkd)}`).then(() => drawAutoBackup(box)).catch(toastErr));
 }

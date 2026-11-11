@@ -90,6 +90,7 @@ const ENTRIES = [
   ["Actualizaciones", "settings", "updates", null, "actualizar github version"],
   ["Perfiles de configuración", "settings", "configs", null, "guardar configuracion escenario"],
   ["Copia de seguridad", "settings", "system", null, "backup restaurar exportar"],
+  ["Copias automáticas", "settings", "system", "Copias automáticas", "backup automatico copia diaria semanal nas restaurar"],
   ["Registros del sistema", "settings", "logs", null, "logs errores problemas eventos diagnostico unbound"],
   ["Guardián de caché", "unbound", null, "Guardián de caché", "cache limpiar saturada 90"],
   ["Auditoría", "settings", "audit", null, "quien cambio que"],
