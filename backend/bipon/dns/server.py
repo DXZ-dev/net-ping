@@ -89,7 +89,8 @@ class DNSServer:
         self.log_queries = True
         self.block_canary = True
         self.block_icloud = False
-        self.prefer_ipv4 = False  # filtra AAAA (y HTTPS/SVCB con pistas IPv6): los equipos usan IPv4
+        self.prefer_ipv4 = False
+        self.cname_check = True  # bloquea rastreadores camuflados tras un CNAME  # filtra AAAA (y HTTPS/SVCB con pistas IPv6): los equipos usan IPv4
         self.prefetch = True
         self.local: dict[tuple[str, int], list[str]] = {}
         self.cf = {"enabled": False, "domain": "", "server": ""}
@@ -352,7 +353,29 @@ class DNSServer:
             post = self._post_check(name, result[0])
             if post:
                 return self._blocked_reply(req, qtype), post[0], post[1], result[3]
+        if self.cname_check and qtype in (QTYPE.A, QTYPE.AAAA, 65) and self.blocking_enabled:
+            cl = self._cname_cloak(name, result[0], policy)
+            if cl:
+                return self._blocked_reply(req, qtype), cl[0], cl[1], result[3]
         return result
+
+    def _cname_cloak(self, name: str, reply, policy) -> tuple[int, str] | None:
+        """Rastreadores camuflados: tienda.ejemplo.com → CNAME → rastreador.com (bloqueado). El dominio de la
+        web no está en ninguna lista, pero su CNAME sí. Se respeta lo que el usuario haya permitido a mano."""
+        try:
+            rec = reply if isinstance(reply, DNSRecord) else DNSRecord.parse(reply)
+        except Exception:
+            return None
+        targets = [str(rr.rdata).rstrip(".").lower() for rr in rec.rr if rr.rtype == QTYPE.CNAME]
+        if not targets or self.engine.is_allowed(name):
+            return None
+        for tgt in targets:
+            if tgt == name:
+                continue
+            d = self.engine.check(tgt, policy, True, self.global_services)
+            if d is not None and d.blocked and d.status != ST_DEVICE:
+                return d.status, f"Rastreador camuflado (CNAME → {tgt})"
+        return None
 
     _REBIND_SAFE = ("lan", "local", "home.arpa", "internal", "localdomain", "plex.direct", "nip.io", "sslip.io", "fritz.box")
 

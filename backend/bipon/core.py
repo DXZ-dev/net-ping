@@ -177,6 +177,7 @@ class Context:
         self.dns.block_canary = bool(d.get("block_doh_canary", True))
         self.dns.block_icloud = bool(d.get("block_icloud_relay", False))
         self.dns.prefer_ipv4 = bool(d.get("prefer_ipv4", False))
+        self.dns.cname_check = bool(d.get("cname_check", True))
         self.dns.prefetch = bool(d.get("prefetch", True))
         self.dns.cf = d.get("conditional_forwarding") or {}
         self.dns.set_local_records(d.get("local_records") or [])

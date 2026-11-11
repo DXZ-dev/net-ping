@@ -795,7 +795,7 @@ async def device_ports(request: Request, mac: str):
 # =====================================================================
 DNS_FIELDS = {"upstreams", "preset", "strategy", "timeout_ms", "cache_size", "cache_min_ttl", "cache_max_ttl", "optimistic_cache",
               "prefetch", "blocking_mode", "block_ttl", "log_queries", "block_doh_canary", "block_icloud_relay",
-              "conditional_forwarding", "local_records", "auto_optimize", "prefer_ipv4"}
+              "conditional_forwarding", "local_records", "auto_optimize", "prefer_ipv4", "cname_check"}
 
 
 @api.get("/dns")

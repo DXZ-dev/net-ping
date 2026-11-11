@@ -1071,6 +1071,23 @@ async def guard_release(request: Request, mac: str):
     return {"config": c.guard.cfg(), "devices": c.guard.quarantined()}
 
 
+# =====================================================================
+# «¿Algo dejó de funcionar?»: dominios bloqueados que probablemente rompen una app
+# =====================================================================
+@api.get("/blocking/suggestions")
+async def blocking_suggestions(request: Request, hours: int = 3):
+    from .suggest import suggestions
+    return suggestions(ctx(request), max(1, min(hours, 48)))
+
+
+@api.post("/blocking/suggestions/dismiss")
+async def blocking_suggestion_dismiss(request: Request, body: dict = Body(...)):
+    c = ctx(request)
+    lst = list(dict.fromkeys([*(c.settings.get("dismissed_suggestions") or []), str(body.get("domain", ""))[:253]]))[-500:]
+    c.settings.set("dismissed_suggestions", lst, notify=False)
+    return {"ok": True}
+
+
 @api.get("/speedctl")
 async def speedctl_get(request: Request):
     """Método con el que se limitaría la velocidad de cada dispositivo."""

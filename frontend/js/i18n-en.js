@@ -1821,10 +1821,30 @@ export const EN = {
   "Tu router no tiene UPnP activo (eso es bueno para la seguridad).": "Your router has no UPnP enabled (that's good for security).",
   "Ningún puerto abierto por UPnP.": "No ports opened via UPnP.",
   "Peligroso": "Dangerous",
-  "Dispositivo puesto en cuarentena (malware)": "Device quarantined (malware)"
+  "Dispositivo puesto en cuarentena (malware)": "Device quarantined (malware)",
+  "¿Algo dejó de funcionar?": "Did something stop working?",
+  "Estos dominios bloqueados se están reintentando muchas veces: suele ser una app o web que no funciona sin ellos. Si algo falla, permítelo; si no, descártalo.": "These blocked domains are being retried many times: usually an app or website that doesn't work without them. If something breaks, allow it; otherwise dismiss it.",
+  "reintentos": "retries",
+  "Descartar": "Dismiss",
+  "Bloquear rastreadores camuflados (CNAME)": "Block cloaked trackers (CNAME)",
+  "Algunos rastreadores se esconden bajo un subdominio de la propia web (metrics.tienda.com → rastreador). Bipon mira a dónde apunta de verdad y lo bloquea. Lo que permitas a mano se respeta.": "Some trackers hide under a subdomain of the site itself (metrics.shop.com → tracker). Bipon checks where it really points and blocks it. What you allow by hand is respected.",
+  "Historial y «seguir viendo» de YouTube": "YouTube history and «continue watching»",
+  "Inicio de sesión con Facebook en otras apps": "Login with Facebook in other apps",
+  "Funciones de Instagram": "Instagram features",
+  "Sincronización de Chrome / servicios de Google": "Chrome sync / Google services",
+  "Enlaces patrocinados en los resultados de Google": "Sponsored links in Google results",
+  "Enlaces de los correos de Reddit": "Links in Reddit emails",
+  "Descargas de Dropbox": "Dropbox downloads",
+  "Webs que no cargan sin este script": "Sites that don't load without this script",
+  "Enlaces que abren apps (branch.io)": "Links that open apps (branch.io)",
+  "Algunas apps no arrancan sin él": "Some apps won't start without it",
+  "Apps Android con Firebase": "Android apps with Firebase",
+  "Actualizaciones y funciones de Microsoft Edge": "Microsoft Edge updates and features",
+  "Inicio de sesión de Microsoft": "Microsoft sign-in"
 };
 
 export const EN_PATTERNS = [
+  [/^Rastreador camuflado \(CNAME → (.+)\)$/, "Cloaked tracker (CNAME → $1)"],
   [/^Reenvío cifrado \(DoT\) a los más rápidos desde tu ubicación: (.+)$/, "Encrypted forwarding (DoT) to the fastest from your location: $1"],
   [/^Tu red bloquea DNS cifrado \(puerto 853\): reenvío simple a (.+)$/, "Your network blocks encrypted DNS (port 853): plain forwarding to $1"],
   [/^Caché de (Unbound|Bipon) al (\d+) %: (.+) → (\d+) %$/, "$1 cache at $2 %: $3 → $4 %"],
