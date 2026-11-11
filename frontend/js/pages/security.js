@@ -44,8 +44,13 @@ export async function render(el, app) {
           ${s.geo.loaded ? `<span class="badge ok">${t("GeoIP cargada")} · ${s.geo.ranges.toLocaleString()} ${t("rangos")}</span>` : `<span class="badge">${t("GeoIP se descargará al activar un país")}</span>`}</p>
         <div class="chips">${Object.entries(s.countries).map(([code, name]) => `<span class="chip ${countries.has(code) ? "on" : ""}" data-cc="${code}">${esc(countryName(code, name))}</span>`).join("")}</div></div>
     </div>
+    <div class="card mt" id="quarantine"></div>
+    <div class="grid g2 mt"><div class="card" id="bypass"></div><div class="card" id="upnp"></div></div>
     <div class="card mt" id="intruders"></div>`;
   drawIntruders(el.querySelector("#intruders"));
+  drawQuarantine(el.querySelector("#quarantine"));
+  drawBypass(el.querySelector("#bypass"));
+  drawUpnp(el.querySelector("#upnp"));
 
   const save = (patch, msg = t("Guardado")) => api.put("/security", patch).then(() => { toast(msg); app.reload(); }).catch(toastErr);
   el.querySelector("#scan").onclick = (e) => busy(e.currentTarget, async () => { const r = await api.post("/security/scan"); toast(r.length ? `${r.length} ${t("anomalías nuevas")}` : t("Sin anomalías nuevas")); app.reload(); }).catch(() => {});
@@ -75,4 +80,52 @@ async function drawIntruders(box) {
     : `<p class="muted small">${t("Ninguno: todos tus equipos usan una IP de tu red local.")}</p>`}`;
   on(box, "click", "[data-block]", (e, b) => busy(b, () => api.post(`/intruders/${encodeURIComponent(b.dataset.block)}/block`, { block: true })).then((r) => { toast(r.enforced ? t("Internet cortado") : t("Guardado (se cortará al activar el modo router)"), r.enforced ? "ok" : "info", 7000); drawIntruders(box); }).catch(() => {}));
   on(box, "click", "[data-unblock]", (e, b) => busy(b, () => api.post(`/intruders/${encodeURIComponent(b.dataset.unblock)}/block`, { block: false })).then(() => { toast(t("Internet restablecido")); drawIntruders(box); }).catch(() => {}));
+}
+
+
+// Cuarentena automática ante malware
+async function drawQuarantine(box) {
+  const q = await api.get("/guard/quarantine").catch(() => null);
+  if (!q) { box.remove(); return; }
+  box.innerHTML = `<header><h2>${ico("shield")}${t("Cuarentena automática")}</h2>${toggle("q-on", q.config.quarantine)}</header>
+    <p class="muted small mb">${t("Si un equipo muestra malware (dominios aleatorios, túnel DNS o accesos repetidos a dominios maliciosos), se le corta Internet unas horas para que no se propague y te avisamos.")}</p>
+    <label class="field" style="max-width:220px">${t("Horas de cuarentena")}<input type="number" id="q-h" min="1" max="72" value="${q.config.quarantine_hours}"></label>
+    ${q.devices.length ? `<div class="col mt">${q.devices.map((d) => `<div class="row between rec"><span><b>${esc(d.name)}</b> <span class="muted small">${esc(d.ip || "")}</span><div class="small muted">${esc(d.detail || "")} · ${t("hasta")} ${new Date(d.until * 1000).toLocaleString()}</div></span>
+      <button class="btn sm" data-release="${esc(d.mac)}">${ico("check")}${t("Liberar")}</button></div>`).join("")}</div>` : `<p class="muted small mt">${t("Ningún equipo en cuarentena.")}</p>`}`;
+  const save = () => api.put("/guard/quarantine", { quarantine: box.querySelector("[name=q-on]").checked, quarantine_hours: Number(box.querySelector("#q-h").value) || 6 }).then(() => toast(t("Guardado"))).catch(toastErr);
+  box.querySelector("[name=q-on]").onchange = save;
+  box.querySelector("#q-h").onchange = save;
+  on(box, "click", "[data-release]", (e, b) => busy(b, () => api.del(`/guard/quarantine/${encodeURIComponent(b.dataset.release)}`)).then(() => { toast(t("Liberado")); drawQuarantine(box); }).catch(() => {}));
+}
+
+// Equipos que se saltan Bipon
+async function drawBypass(box) {
+  const b = await api.get("/guard/bypass").catch(() => null);
+  if (!b) { box.remove(); return; }
+  const list = (rows, extra) => rows.length ? `<div class="col">${rows.map((d) => `<div class="rec small"><b>${esc(d.name)}</b> <span class="muted">${esc(d.ip)}</span>${extra(d)}</div>`).join("")}</div>` : `<p class="muted small">${t("Ninguno")}</p>`;
+  box.innerHTML = `<header><h2>${ico("alert")}${t("Equipos que se saltan Bipon")}</h2></header>
+    <p class="muted small mb">${t("Su tráfico no se filtra: no ven el bloqueo de anuncios ni el control parental.")}</p>
+    <h4 class="mb">${t("Sin usar el DNS de Bipon (últimas 24 h)")}</h4>
+    ${list(b.no_dns, () => `<div class="muted">${t("Tiene un DNS puesto a mano. Quítalo en la configuración de red del equipo o activa «Forzar DNS de Bipon» en modo router.")}</div>`)}
+    <h4 class="mt mb">${t("Usando DNS cifrado externo")}</h4>
+    ${list(b.encrypted, (d) => `<div class="muted">${d.domains.map((x) => esc(x.domain)).join(", ")}</div>`)}
+    <div class="row mt"><button class="btn sm ${b.doh_blocked ? "" : "primary"}" id="doh">${ico("shield")}${b.doh_blocked ? t("Permitir DNS cifrado externo") : t("Bloquear DNS cifrado externo en toda la red")}</button></div>
+    ${b.force_dns ? `<p class="small muted mt">${ico("check")} ${t("Forzar DNS de Bipon está activo (modo router).")}</p>` : ""}`;
+  box.querySelector("#doh").onclick = (e) => busy(e.currentTarget, () => api.post("/guard/block-doh", { block: !b.doh_blocked })).then(() => { toast(t("Guardado")); drawBypass(box); }).catch(() => {});
+}
+
+// Puertos abiertos al exterior por UPnP
+async function drawUpnp(box) {
+  box.innerHTML = `<header><h2>${ico("router")}${t("Puertos abiertos en tu router")}</h2><button class="btn sm" id="up-r">${ico("refresh")}${t("Revisar")}</button></header><p class="muted small">${t("Buscando…")}</p>`;
+  const r = await api.get("/guard/upnp").catch(() => null);
+  const RISK = { high: ["err", "Peligroso"], medium: ["warn", "Revisar"], info: ["", "Normal"] };
+  box.innerHTML = `<header><h2>${ico("router")}${t("Puertos abiertos en tu router")}</h2><button class="btn sm" id="up-r">${ico("refresh")}${t("Revisar")}</button></header>
+    <p class="muted small mb">${t("Lo que tu router ha abierto hacia Internet por UPnP (muchas veces sin que lo sepas). Los peligrosos conviene cerrarlos.")}</p>
+    ${!r || !r.available ? `<p class="muted small">${t("Tu router no tiene UPnP activo (eso es bueno para la seguridad).")}</p>`
+      : r.mappings.length ? `<div class="table-wrap"><table><tbody>${r.mappings.map((m) => `<tr><td><span class="badge ${RISK[m.risk][0]}">${t(RISK[m.risk][1])}</span></td>
+          <td class="mono small">${m.external_port}/${esc(m.protocol)}</td><td class="small"><b>${esc(m.device || "")}</b><div class="muted">${esc(m.why || m.description || "")}</div></td>
+          <td class="actions"><button class="btn sm ${m.risk === "high" ? "danger" : ""}" data-upclose="${m.external_port}" data-proto="${esc(m.protocol)}">${t("Cerrar")}</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<p class="muted small">${ico("check")} ${t("Ningún puerto abierto por UPnP.")}</p>`}`;
+  box.querySelector("#up-r").onclick = () => drawUpnp(box);
+  on(box, "click", "[data-upclose]", (e, b) => busy(b, () => api.post("/guard/upnp/close", { external_port: Number(b.dataset.upclose), protocol: b.dataset.proto })).then(() => { toast(t("Puerto cerrado")); drawUpnp(box); }).catch(() => {}));
 }

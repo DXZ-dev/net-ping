@@ -80,6 +80,8 @@ class Context:
         self.power = PowerControl(self)
         from .quality import Quality
         self.quality = Quality(self)
+        from .guard import Guard
+        self.guard = Guard(self)
         self.routerctl = RouterControl(self)
         self.configs = ConfigProfiles(self)
         self.updater = Updater(self)

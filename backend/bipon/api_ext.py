@@ -1005,6 +1005,72 @@ async def quality_report(request: Request, days: int = 30, format: str = "json",
     return q.report(days)
 
 
+# =====================================================================
+# Seguridad avanzada: bypass de DNS, auditoría UPnP, cuarentena
+# =====================================================================
+@api.get("/guard/bypass")
+async def guard_bypass(request: Request, hours: int = 24):
+    return ctx(request).guard.bypass(max(1, min(hours, 168)))
+
+
+@api.post("/guard/block-doh")
+async def guard_block_doh(request: Request, body: dict = Body(default={})):
+    """Bloquea (o permite) el DNS cifrado externo en toda la red para que nadie se salte el filtro."""
+    c = ctx(request)
+    svc = set(c.settings.get("blocked_services") or [])
+    if body.get("block", True):
+        svc.add("public_doh")
+    else:
+        svc.discard("public_doh")
+    c.settings.set("blocked_services", sorted(svc))
+    c.cache.clear()
+    return c.guard.bypass()
+
+
+@api.get("/guard/upnp")
+async def guard_upnp(request: Request):
+    return await ctx(request).guard.upnp_audit()
+
+
+@api.post("/guard/upnp/close")
+async def guard_upnp_close(request: Request, body: dict = Body(...)):
+    from . import nat
+    igd = await nat.find_igd()
+    if not igd:
+        raise HTTPException(400, "No se encontró un router con UPnP")
+    try:
+        await igd.delete_mapping(int(body["external_port"]), str(body.get("protocol", "TCP")))
+    except Exception as exc:
+        raise HTTPException(400, f"El router rechazó cerrar el puerto: {str(exc)[:120]}")
+    ctx(request).db.event("info", "seguridad", f"Puerto {body['external_port']}/{body.get('protocol', 'TCP')} cerrado en el router (UPnP)")
+    return await ctx(request).guard.upnp_audit()
+
+
+@api.get("/guard/quarantine")
+async def guard_quarantine(request: Request):
+    c = ctx(request)
+    return {"config": c.guard.cfg(), "devices": c.guard.quarantined()}
+
+
+@api.put("/guard/quarantine")
+async def guard_quarantine_cfg(request: Request, body: dict = Body(...)):
+    c = ctx(request)
+    cfg = c.guard.cfg()
+    if "quarantine" in body:
+        cfg["quarantine"] = bool(body["quarantine"])
+    if "quarantine_hours" in body:
+        cfg["quarantine_hours"] = max(1, min(int(body["quarantine_hours"]), 72))
+    c.settings.set("guard", cfg, notify=False)
+    return {"config": cfg, "devices": c.guard.quarantined()}
+
+
+@api.delete("/guard/quarantine/{mac}")
+async def guard_release(request: Request, mac: str):
+    c = ctx(request)
+    c.guard.release(mac)
+    return {"config": c.guard.cfg(), "devices": c.guard.quarantined()}
+
+
 @api.get("/speedctl")
 async def speedctl_get(request: Request):
     """Método con el que se limitaría la velocidad de cada dispositivo."""

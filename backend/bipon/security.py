@@ -183,6 +183,9 @@ class SecurityManager:
         self.ctx.notify.emit("anomaly", ANOMALY_LABELS.get(kind, kind), f"{name}: {detail}", data={"client": client, "kind": kind},
                              key=f"{client}:{kind}")
         log.warning("anomalía %s en %s: %s", kind, client, detail)
+        guard = getattr(self.ctx, "guard", None)
+        if guard is not None:
+            guard.on_anomaly(mac, client, kind, detail)
 
     def analyze(self) -> list[dict]:
         since = time.time() - WINDOW

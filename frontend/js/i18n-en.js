@@ -1799,7 +1799,29 @@ export const EN = {
   "Proveedor": "Provider",
   "Con caché": "Cached",
   "Midiendo los DNS más cercanos desde tu ubicación… (≈10-20 s)": "Measuring the nearest DNS from your location… (≈10-20 s)",
-  "Unbound autoconfigurado": "Unbound autoconfigured"
+  "Unbound autoconfigurado": "Unbound autoconfigured",
+  "Cuarentena automática": "Automatic quarantine",
+  "Si un equipo muestra malware (dominios aleatorios, túnel DNS o accesos repetidos a dominios maliciosos), se le corta Internet unas horas para que no se propague y te avisamos.": "If a device shows malware (random domains, DNS tunnel or repeated access to malicious domains), its Internet is cut for a few hours so it doesn't spread, and you're notified.",
+  "Horas de cuarentena": "Quarantine hours",
+  "Liberar": "Release",
+  "Liberado": "Released",
+  "Ningún equipo en cuarentena.": "No device in quarantine.",
+  "Equipos que se saltan Bipon": "Devices bypassing Bipon",
+  "Su tráfico no se filtra: no ven el bloqueo de anuncios ni el control parental.": "Their traffic isn't filtered: no ad blocking or parental control for them.",
+  "Sin usar el DNS de Bipon (últimas 24 h)": "Not using Bipon's DNS (last 24 h)",
+  "Tiene un DNS puesto a mano. Quítalo en la configuración de red del equipo o activa «Forzar DNS de Bipon» en modo router.": "It has a DNS set by hand. Remove it in the device's network settings or enable «Force Bipon DNS» in router mode.",
+  "Usando DNS cifrado externo": "Using external encrypted DNS",
+  "Permitir DNS cifrado externo": "Allow external encrypted DNS",
+  "Bloquear DNS cifrado externo en toda la red": "Block external encrypted DNS network-wide",
+  "Forzar DNS de Bipon está activo (modo router).": "Force Bipon DNS is active (router mode).",
+  "Puertos abiertos en tu router": "Ports open on your router",
+  "Revisar": "Check",
+  "Buscando…": "Searching…",
+  "Lo que tu router ha abierto hacia Internet por UPnP (muchas veces sin que lo sepas). Los peligrosos conviene cerrarlos.": "What your router has opened to the Internet via UPnP (often without you knowing). Close the dangerous ones.",
+  "Tu router no tiene UPnP activo (eso es bueno para la seguridad).": "Your router has no UPnP enabled (that's good for security).",
+  "Ningún puerto abierto por UPnP.": "No ports opened via UPnP.",
+  "Peligroso": "Dangerous",
+  "Dispositivo puesto en cuarentena (malware)": "Device quarantined (malware)"
 };
 
 export const EN_PATTERNS = [
