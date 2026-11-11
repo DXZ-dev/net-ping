@@ -137,8 +137,23 @@ export async function render(el, app) {
           <p class="muted small">${t("Exporta listas, reglas, perfiles, nombres de dispositivos y configuración (sin contraseñas ni claves VPN).")}</p>
           <div class="row mt"><a class="btn primary" href="/api/backup">${ico("download")}${t("Descargar copia")}</a><label class="btn">${ico("upload")}${t("Restaurar…")}<input type="file" accept=".json" id="restore" class="hidden"></label>
             <a class="btn" href="/api/export/queries.csv">${ico("download")}${t("Exportar consultas (CSV)")}</a></div></div>
+          <div class="card"><header><h2>${ico("trash")}${t("Borrar datos")}</h2></header>
+            <p class="muted small mb">${t("Acciones irreversibles. La configuración, las listas y los perfiles no se tocan.")}</p>
+            <div class="col">
+              <button class="btn" id="del-stats">${ico("trash")}${t("Borrar estadísticas")}</button>
+              <button class="btn" id="del-logs">${ico("trash")}${t("Borrar registros")}</button>
+              <button class="btn danger" id="del-devs">${ico("trash")}${t("Borrar dispositivos conocidos")}</button></div>
+            <p class="small muted mt">${t("«Borrar dispositivos conocidos» es ideal tras cambiar la clave del Wi-Fi/router: se vacía la lista y solo reaparecen los equipos que se reconecten con la clave nueva.")}</p></div>
           <div class="card"><header><h2>${ico("info")}${t("Acerca de")}</h2></header><dl class="kv"><dt>${t("Versión")}</dt><dd>Bipon Net ${esc(sys.version)}</dd><dt>${t("Sistema")}</dt><dd>${esc(sys.platform)}</dd>
             <dt>Python</dt><dd>${esc(sys.python)}</dd><dt>${t("IP del servidor")}</dt><dd>${esc(sys.ip || "")}</dd><dt>${t("Puerto DNS")}</dt><dd>${esc(sys.dns.port)}</dd><dt>API</dt><dd><a href="/api/docs" target="_blank" rel="noopener">/api/docs</a></dd></dl></div></div>`;
+      const reset = (what, title, msg) => async () => {
+        if (!(await confirmDialog(title, msg))) return;
+        const r = await api.post("/system/reset", { what }).catch(toastErr);
+        if (r) toast(`${t("Borrado")}: ${r.deleted.map((x) => t(x)).join(", ")}`);
+      };
+      pane.querySelector("#del-stats").onclick = reset(["stats"], t("Borrar estadísticas"), t("Se borrarán consultas, velocidad, tráfico y monitor. ¿Continuar?"));
+      pane.querySelector("#del-logs").onclick = reset(["logs"], t("Borrar registros"), t("Se borrarán los eventos y el registro de la aplicación. ¿Continuar?"));
+      pane.querySelector("#del-devs").onclick = reset(["devices"], t("Borrar dispositivos conocidos"), t("Se borrará la lista de dispositivos y las aceptaciones del portal. Reaparecerán al reconectarse. ¿Continuar?"));
       pane.querySelector("#ed-save").onclick = (e) => busy(e.currentTarget, () => api.put("/system/prefs", { edition: pane.querySelector("#ed").value, privacy: { anonymize_clients: pane.querySelector("#anon").checked } })).then(() => toast(t("Guardado"))).catch(() => {});
       const f = pane.querySelector("#gen");
       f.onsubmit = (e) => { e.preventDefault(); busy(f.querySelector("button.primary"), () => api.put("/settings", {

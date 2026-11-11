@@ -193,3 +193,9 @@ def test_cache_trim_and_usage():
 def test_parse_size():
     from bipon.cacheguard import parse_size
     assert parse_size("64m") == 64 * 1024 ** 2 and parse_size("1g") == 1024 ** 3 and parse_size("512k") == 512 * 1024
+
+
+def test_unbound_recommend_hardenings():
+    from bipon.unbound import recommend_config
+    c = recommend_config({}, 2, 2 * 1024 ** 3)["config"]
+    assert c["dnssec"] and c["qname_minimisation"] and c["edns_buffer_size"] == 1232 and c["num_threads"] == 2

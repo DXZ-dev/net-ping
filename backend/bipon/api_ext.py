@@ -1066,6 +1066,57 @@ async def configs_delete(request: Request, pid: int):
 # =====================================================================
 # Edición, privacidad y preferencias de interfaz
 # =====================================================================
+@api.post("/system/reset")
+async def system_reset(request: Request, body: dict = Body(...)):
+    """Borra datos a elección: estadísticas, registros, o la lista de dispositivos conocidos/registrados.
+    Borrar los dispositivos conocidos es útil tras cambiar la clave del Wi-Fi: solo reaparecen los que se reconecten."""
+    if request.state.user.get("role") != "admin":
+        raise HTTPException(403)
+    c = ctx(request)
+    what = set(body.get("what") or [])
+    if not what:
+        raise HTTPException(400, "Nada que borrar")
+    done = []
+    db = c.db
+    if "stats" in what:  # estadísticas: consultas, velocidad, tráfico, uso, monitor
+        db.flush_queries()
+        for tbl in ("queries", "speedtests", "traffic", "usage", "monitor"):
+            db.execute(f"DELETE FROM {tbl}")
+        c.cache.clear()
+        done.append("estadísticas")
+    if "logs" in what:  # registros de eventos y de la aplicación
+        db.execute("DELETE FROM events")
+        try:
+            from . import applog
+            applog.BUFFER.clear()
+        except Exception:
+            pass
+        done.append("registros")
+    if "audit" in what:
+        db.execute("DELETE FROM audit")
+        done.append("auditoría")
+    if "devices" in what:  # dispositivos conocidos y aceptaciones del portal (p. ej. tras cambiar la clave del router)
+        db.execute("DELETE FROM devices")
+        db.execute("DELETE FROM dhcp_leases")
+        if hasattr(c, "captive"):
+            try:
+                c.captive.reset()
+                db.execute("DELETE FROM captive_accepts")
+            except Exception:
+                pass
+        c.devices.devices.clear()
+        c.devices.ip_to_mac.clear()
+        c.devices.load()
+        c.devices.last_scan = 0
+        c.devices.publish("reset", "")
+        done.append("dispositivos conocidos")
+    if "anomalies" in what:
+        db.execute("DELETE FROM anomalies")
+        done.append("anomalías")
+    c.db.event("warning", "sistema", f"Datos borrados por {request.state.user.get('username')}: {', '.join(done)}")
+    return {"ok": True, "deleted": done}
+
+
 @api.get("/system/prefs")
 async def prefs_get(request: Request):
     c = ctx(request)

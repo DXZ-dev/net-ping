@@ -1712,7 +1712,22 @@ export const EN = {
   "Optimizar Unbound": "Optimize Unbound",
   "Unbound optimizado": "Unbound optimized",
   "Cambios": "Changes",
-  "Ajusta hilos y tamaños de caché al hardware de este equipo, y activa prefetch, serve-expired y los endurecimientos recomendados.": "Adjusts threads and cache sizes to this machine's hardware, and enables prefetch, serve-expired and the recommended hardenings."
+  "Ajusta hilos y tamaños de caché al hardware de este equipo, y activa prefetch, serve-expired y los endurecimientos recomendados.": "Adjusts threads and cache sizes to this machine's hardware, and enables prefetch, serve-expired and the recommended hardenings.",
+  "Borrar datos": "Delete data",
+  "Acciones irreversibles. La configuración, las listas y los perfiles no se tocan.": "Irreversible actions. Configuration, lists and profiles are not touched.",
+  "Borrar estadísticas": "Delete statistics",
+  "Borrar registros": "Delete logs",
+  "Borrar dispositivos conocidos": "Delete known devices",
+  "«Borrar dispositivos conocidos» es ideal tras cambiar la clave del Wi-Fi/router: se vacía la lista y solo reaparecen los equipos que se reconecten con la clave nueva.": "«Delete known devices» is ideal after changing the Wi-Fi/router password: the list is cleared and only devices that reconnect with the new password reappear.",
+  "Borrado": "Deleted",
+  "Se borrarán consultas, velocidad, tráfico y monitor. ¿Continuar?": "Queries, speed, traffic and monitor will be deleted. Continue?",
+  "Se borrarán los eventos y el registro de la aplicación. ¿Continuar?": "Events and the application log will be deleted. Continue?",
+  "Se borrará la lista de dispositivos y las aceptaciones del portal. Reaparecerán al reconectarse. ¿Continuar?": "The device list and portal acceptances will be deleted. They reappear on reconnect. Continue?",
+  "estadísticas": "statistics",
+  "registros": "logs",
+  "dispositivos conocidos": "known devices",
+  "auditoría": "audit",
+  "anomalías": "anomalies"
 };
 
 export const EN_PATTERNS = [
