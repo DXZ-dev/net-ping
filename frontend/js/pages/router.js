@@ -102,7 +102,11 @@ export async function render(el) {
     },
     // ------------------------------------------------------------ velocidad
     async speed() {
-      const [r, d, lv] = await Promise.all([api.get("/router"), api.get("/devices"), api.get("/devices/rates").catch(() => ({ rates: {} }))]);
+      const [r, d, lv, sc] = await Promise.all([api.get("/router"), api.get("/devices"), api.get("/devices/rates").catch(() => ({ rates: {} })),
+        api.get("/speedctl").catch(() => ({ methods: {}, labels: {} }))]);
+      const MSHORT = { proxmox: "Proxmox", router: "Bipon", mikrotik: "MikroTik", openwrt: "OpenWrt" };
+      const meth = (mac) => { const m = sc.methods[mac]; return m ? `<span class="badge ok" title="${esc(t(sc.labels[m] || ""))}">${MSHORT[m]}</span>` : `<span class="badge" title="${t("Sin método disponible")}">—</span>`; };
+      const anyMethod = Object.values(sc.methods || {}).some(Boolean);
       const SRC = { router: "router", proxmox: "Proxmox", local: "Bipon" };
       const cell = (x, k, arrow) => {
         const v = lv.rates[x.mac];
@@ -113,30 +117,48 @@ export async function render(el) {
       const draw = (devs) => devs.map((x) => `<tr data-mac="${esc(x.mac)}"><td>${brandIcon(x.brand, x.kind)}</td><td><b>${esc(x.name || x.friendly || x.hostname || x.ip || x.mac)}</b><div class="small muted mono">${esc(x.ip || "")}</div></td>
         <td class="right rate"><span class="d">${cell(x, "rx_bps", "↓")}</span></td><td class="right rate"><span class="u">${cell(x, "tx_bps", "↑")}</span></td>
         <td class="small muted src">${lv.rates[x.mac] ? esc(SRC[lv.rates[x.mac].source] || "") : ""}</td>
+        <td>${meth(x.mac)}</td>
         <td><input type="number" step="0.5" min="0" data-ld="${esc(x.mac)}" value="${x.limit_down || ""}" placeholder="∞" style="width:90px"></td>
         <td><input type="number" step="0.5" min="0" data-lu="${esc(x.mac)}" value="${x.limit_up || ""}" placeholder="∞" style="width:90px"></td>
-        <td class="actions"><button class="btn sm" data-lim="${esc(x.mac)}">${t("Aplicar")}</button></td></tr>`).join("");
-      pane.innerHTML = `<div class="card mb"><header><h2>${ico("gauge")}${t("Límites de velocidad")}</h2>${sh.enabled ? `<span class="badge ok">${t("activos")}</span>` : `<span class="badge">${t("desactivados")}</span>`}</header>
-        <p class="muted small mb">${t("Asigna a cada dispositivo una velocidad máxima de bajada y subida (Mbps). Requiere el modo router: Bipon controla el tráfico con colas HTB + fq_codel.")}</p>
-        <form class="form-grid" id="shf"><div class="opt" style="border:0"><div class="t"><b>${t("Activar límites")}</b></div>${toggle("enabled", sh.enabled)}</div>
+        <td class="actions nowrap"><select data-preset="${esc(x.mac)}" title="${t("Límite rápido")}" style="width:auto"><option value="">${t("Rápido…")}</option>${[1, 3, 5, 10, 25, 50].map((v) => `<option value="${v}">${v} Mbps</option>`).join("")}<option value="0">${t("Sin límite")}</option></select>
+          <button class="btn sm" data-lim="${esc(x.mac)}">${t("Aplicar")}</button></td></tr>`).join("");
+      pane.innerHTML = `<div class="card mb"><header><h2>${ico("gauge")}${t("Controlador de velocidad")}</h2></header>
+        <p class="muted small">${t("Pon a cada dispositivo una velocidad máxima de bajada y subida. Bipon la aplica donde pasa su tráfico, sin necesidad de ser el router:")}</p>
+        <div class="grid g4 mt small">
+          <div class="rec"><b>${ico("server")} Proxmox</b><div class="muted">${sc.proxmox ? t("VMs y LXC: activo") : t("Conecta Proxmox en Integraciones")}</div></div>
+          <div class="rec"><b>${ico("router")} MikroTik</b><div class="muted">${sc.router_type === "mikrotik" ? t("Conectado: colas por dispositivo") : t("Conéctalo en «Mi router»")}</div></div>
+          <div class="rec"><b>${ico("router")} OpenWrt</b><div class="muted">${sc.router_type === "openwrt" ? t("Conectado (requiere nft-qos)") : t("Conéctalo en «Mi router»")}</div></div>
+          <div class="rec"><b>${ico("shield")} ${t("Modo router")}</b><div class="muted">${sc.router_mode ? t("Activo: todos los dispositivos") : t("Opcional (abajo)")}</div></div></div>
+        ${anyMethod ? "" : `<div class="alert warn mt">${ico("alert")}<div class="small">${t("Tu router actual no permite controlar la velocidad desde fuera (los routers del proveedor no tienen API). Los límites se guardan y se aplicarán en cuanto conectes un MikroTik/OpenWrt o actives el modo router. Las VMs de Proxmox sí se limitan ya.")}</div></div>`}
+        <details class="mt"><summary class="small">${t("Modo router (opcional): Bipon limita a todos los dispositivos con colas HTB + fq_codel")}</summary>
+        <form class="form-grid mt" id="shf"><div class="opt" style="border:0"><div class="t"><b>${t("Activar límites")}</b></div>${toggle("enabled", sh.enabled)}</div>
           <label class="field">${t("Interfaz LAN")}<input name="iface" value="${esc(sh.iface || r.config.lan || "")}"></label>
           <label class="field">${t("Bajada total de tu línea (Mbps)")}<input type="number" name="down_mbit" value="${sh.down_mbit || ""}"></label>
           <label class="field">${t("Subida total de tu línea (Mbps)")}<input type="number" name="up_mbit" value="${sh.up_mbit || ""}"></label>
-          <div class="row" style="align-items:flex-end"><button class="btn primary">${ico("check")}${t("Guardar")}</button></div></form></div>
+          <div class="row" style="align-items:flex-end"><button class="btn primary">${ico("check")}${t("Guardar")}</button></div></form></details></div>
         <div class="grid g2 mb">
           <div class="card stat"><div class="ic tint-blue">${ico("globe")}</div><div class="truncate"><div class="v" id="line-v">${lv.line ? `↓${rate(lv.line.rx_bps)} · ↑${rate(lv.line.tx_bps)}` : "—"}</div>
             <div class="l">${t("Internet en total (router por UPnP)")}${lv.line ? "" : ` · <span class="small">${t("tu router no publica los contadores por UPnP")}</span>`}</div></div></div>
           ${lv.router_mode ? `<div class="alert ok">${ico("check")}<div class="small">${t("Modo router activo: se mide la velocidad de todos los dispositivos.")}</div></div>`
             : `<div class="alert info">${ico("info")}<div class="small"><b>${t("¿Por qué algunos equipos muestran «—»?")}</b> ${t("Bipon sólo puede medir el tráfico que pasa por él. Ahora mide en vivo: el propio Bipon")}${lv.proxmox ? t(", las VMs y contenedores de Proxmox") : ""}${t(" y el total de la línea. Para medir cada móvil, TV o PC, activa el modo router (Bipon como puerta de enlace) en «Modo router y firewall».")}</div></div>`}
         </div>
-        <div class="card"><header><h3>${ico("devices")}${t("Dispositivos")} <span class="live-dot"></span></h3></header><div class="table-wrap"><table><thead><tr><th></th><th>${t("Dispositivo")}</th><th class="right">${t("Bajada ahora")}</th><th class="right">${t("Subida ahora")}</th><th>${t("Fuente")}</th><th>${t("Límite ↓")}</th><th>${t("Límite ↑")}</th><th></th></tr></thead>
+        <div class="card"><header><h3>${ico("devices")}${t("Dispositivos")} <span class="live-dot"></span></h3></header><div class="table-wrap"><table><thead><tr><th></th><th>${t("Dispositivo")}</th><th class="right">${t("Bajada ahora")}</th><th class="right">${t("Subida ahora")}</th><th>${t("Fuente")}</th><th>${t("Control")}</th><th>${t("Límite ↓")}</th><th>${t("Límite ↑")}</th><th></th></tr></thead>
         <tbody id="spd">${draw(d.devices.filter((x) => x.ip))}</tbody></table></div></div>`;
       const shf = pane.querySelector("#shf");
       shf.onsubmit = (e) => { e.preventDefault(); busy(shf.querySelector(".primary"), () => api.post("/router/shaping", { enabled: shf.enabled.checked, iface: shf.iface.value.trim(), down_mbit: Number(shf.down_mbit.value) || null, up_mbit: Number(shf.up_mbit.value) || null })).then((x) => toast(x.message, x.ok ? "ok" : "error", 7000)).catch(() => {}); };
       on(pane, "click", "[data-lim]", (e, b) => {
         const mac = b.dataset.lim;
         busy(b, () => api.patch(`/devices/${encodeURIComponent(mac)}/limit`, { limit_down: pane.querySelector(`[data-ld="${CSS.escape(mac)}"]`).value || null, limit_up: pane.querySelector(`[data-lu="${CSS.escape(mac)}"]`).value || null }))
-          .then((x) => toast(x.message || t("Límite aplicado"), x.applied === null ? "info" : "ok", 6000)).catch(() => {});
+          .then((x) => toast(x.message || t("Límite aplicado"), x.ok === false ? "error" : x.applied ? "ok" : "info", 7000)).catch(() => {});
+      });
+      on(pane, "change", "[data-preset]", (e, sel) => {
+        if (sel.value === "") return;
+        const mac = sel.dataset.preset;
+        const v = sel.value === "0" ? "" : sel.value;
+        pane.querySelector(`[data-ld="${CSS.escape(mac)}"]`).value = v;
+        pane.querySelector(`[data-lu="${CSS.escape(mac)}"]`).value = v ? Math.max(1, Math.round(v / 2)) : "";
+        sel.value = "";
+        pane.querySelector(`[data-lim="${CSS.escape(mac)}"]`).click();
       });
       timer = setInterval(async () => {
         const n = await api.get("/devices/rates").catch(() => null);

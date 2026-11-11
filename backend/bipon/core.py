@@ -70,6 +70,8 @@ class Context:
         self.router = RouterManager(self)
         from .liverates import LiveRates
         self.rates = LiveRates(self)
+        from .speedctl import SpeedControl
+        self.speedctl = SpeedControl(self)
         self.routerctl = RouterControl(self)
         self.configs = ConfigProfiles(self)
         self.updater = Updater(self)

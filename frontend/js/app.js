@@ -249,7 +249,8 @@ function renderShell(version) {
   $("#root").innerHTML = `
   <div class="app">
     <aside class="sidebar">
-      <div class="brand">${LOGO}<div><b>${APP_NAME}</b><small>v${esc(version)} · ${session.edition === "business" ? t("Empresa") : t("Hogar")}</small></div></div>
+      <div class="brand-row"><a class="brand" href="#/dashboard" title="${t("Ir al panel")}">${LOGO}<div><b>${APP_NAME}</b><small>v${esc(version)} · ${session.edition === "business" ? t("Empresa") : t("Hogar")}</small></div></a>
+        <button class="icon-btn nav-close" id="nav-close" aria-label="${t("Cerrar menú")}" title="${t("Cerrar menú")}">${ico("x")}</button></div>
       <nav class="nav">${nav}</nav>
       <div class="sidebar-foot">
         <a class="icon-btn" href="#/settings" title="${t("Apariencia")}">${ico("sun")}</a>
@@ -260,6 +261,7 @@ function renderShell(version) {
         <button class="icon-btn" id="logout-btn" title="${t("Cerrar sesión")}">${ico("logout")}</button>
       </div>
     </aside>
+    <div class="nav-backdrop" id="nav-backdrop"></div>
     <div class="main">
       <header class="topbar">
         <button class="icon-btn menu-btn" id="menu-btn" aria-label="${t("Menú")}">${ico("menu")}</button>
@@ -277,7 +279,17 @@ function renderShell(version) {
   };
   $("#logout-btn").onclick = async () => { await api.post("/auth/logout"); boot(); };
   $("#tour-btn").onclick = () => import("./tour.js").then((m) => m.startTour(true));
+  const closeNav = () => $(".app")?.classList.remove("nav-open");
   $("#menu-btn").onclick = () => $(".app").classList.toggle("nav-open");
+  $("#nav-close").onclick = closeNav;
+  $("#nav-backdrop").onclick = closeNav;
+  // tocar cualquier enlace del menú lo cierra (también si es la página actual)
+  $(".sidebar").addEventListener("click", (e) => { if (e.target.closest("a[href^='#/']")) setTimeout(closeNav, 50); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeNav(); });
+  // deslizar hacia la izquierda cierra el menú en el móvil
+  let sx = null;
+  $(".sidebar").addEventListener("touchstart", (e) => { sx = e.touches[0].clientX; }, { passive: true });
+  $(".sidebar").addEventListener("touchend", (e) => { if (sx != null && sx - e.changedTouches[0].clientX > 60) closeNav(); sx = null; }, { passive: true });
   $("#search-btn").onclick = () => import("./search.js").then((m) => m.openSearch());
   if (!searchReady) { searchReady = true; import("./search.js").then((m) => m.initSearch(NAV, role)); }
   window.onhashchange = route;

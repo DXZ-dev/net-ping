@@ -56,6 +56,7 @@ class LiveRates:
         self._wan_search = 0.0
         self._pve_inv_ts = 0.0
         self._vm_macs: dict[str, list[str]] = {}
+        self.ping_ms: float | None = None  # latencia a Internet en vivo (cada ~5 s)
 
     def _set(self, key: str, macs: list[str], rx: int, tx: int, source: str, wrap: int | None = None) -> dict | None:
         now = time.monotonic()
@@ -148,6 +149,11 @@ class LiveRates:
         if r:
             self.line = r
 
+    async def _ping(self) -> None:
+        from .pinger import ping
+        r = await ping("1.1.1.1", 1)
+        self.ping_ms = r.get("avg") if r and r.get("loss", 100) < 100 else None
+
     # ---------------------------------------------------------------- bucle
     async def loop(self) -> None:
         await asyncio.sleep(10)
@@ -156,7 +162,7 @@ class LiveRates:
             try:
                 self._self()
                 if tick % 2 == 0:
-                    await asyncio.gather(self._proxmox(), self._line(), return_exceptions=True)
+                    await asyncio.gather(self._proxmox(), self._line(), self._ping(), return_exceptions=True)
             except Exception as exc:  # pragma: no cover
                 log.debug("rates: %s", exc)
             tick += 1

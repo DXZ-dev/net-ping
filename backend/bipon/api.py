@@ -683,6 +683,30 @@ async def devices_stream(request: Request):
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
 
 
+def _live_snapshot(c) -> dict:
+    st = c.dns.stats()
+    now = time.time()
+    devs = c.devices.devices.values()
+    online = sum(1 for d in devs if d.get("online") or now - c.devices.activity.get(d.get("ip") or "", 0) < 600)
+    inet = c.rates.ping_ms
+    line = c.rates.line if c.rates.line and now - c.rates.line["ts"] < 30 else None
+    return {"ts": now, "total": st["total"], "blocked": st["blocked"], "cached": st["cached"], "qps": st["qps"],
+            "avg_response_ms": st["avg_response_ms"], "hit_ratio": st["cache"].get("hit_ratio"), "online": online,
+            "devices": len(c.devices.devices), "inet_ms": inet, "line": line, "rates": c.rates.snapshot()}
+
+
+@api.get("/stats/live")
+async def stats_live(request: Request):
+    """Estadísticas en tiempo real (SSE, cada 2 s): contadores DNS, consultas/s, dispositivos, latencia y velocidad."""
+    c = ctx(request)
+
+    async def gen():
+        while not await request.is_disconnected():
+            yield f"data: {json.dumps(_live_snapshot(c), ensure_ascii=False)}\n\n"
+            await asyncio.sleep(2)
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"cache-control": "no-cache", "x-accel-buffering": "no"})
+
+
 @api.post("/devices/scan")
 async def devices_scan(request: Request):
     return await ctx(request).devices.scan()

@@ -731,13 +731,13 @@ async def device_limit(request: Request, mac: str, body: dict = Body(...)):
             raise HTTPException(400, "Límite entre 0,1 y 10000 Mbps")
     c.db.execute("UPDATE devices SET limit_down=?, limit_up=? WHERE mac=?", (down, up, mac))
     c.devices.load()
-    if (c.router.cfg().get("shaping") or {}).get("enabled"):
-        try:
-            res = await c.router.apply_shaping()
-        except (ValueError, RuntimeError) as exc:
-            _bad(exc)
-        return {"ok": True, "applied": res}
-    return {"ok": True, "applied": None, "message": "Guardado. Activa «Límites de velocidad» en Modo router para aplicarlo."}
+    return await c.speedctl.apply(mac, down, up)
+
+
+@api.get("/speedctl")
+async def speedctl_get(request: Request):
+    """Método con el que se limitaría la velocidad de cada dispositivo."""
+    return ctx(request).speedctl.overview()
 
 
 # =====================================================================

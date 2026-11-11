@@ -44,6 +44,7 @@ export async function render(el, app) {
   let layout = { order: DEFAULT_ORDER, hidden: [], ...(prefs.dashboard || {}) };
   layout.order = layout.order.filter((id) => W[id]);
   let data = null;
+  let base = null;
 
   el.innerHTML = `<div id="dash-alerts" class="col mb"></div>
     <div class="row mb" id="dash-head"><div class="btn-group" id="range">${RANGES.map(([v, l]) => `<button data-h="${v}" class="${v === hours ? "active" : ""}">${t(l)}</button>`).join("")}</div>
@@ -121,6 +122,7 @@ export async function render(el, app) {
     const [s, sys, events, devs, sec] = await Promise.all([api.get(`/stats/summary?hours=${hours}`), api.get("/system"), api.get("/events?limit=8"),
       api.get("/devices").catch(() => ({ devices: [] })), api.get("/security").catch(() => ({ anomalies: [] }))]);
     data = { s, sys, events, devs: devs.devices, sec };
+    base = { total: sys.dns.total, blocked: sys.dns.blocked };  // contadores en vivo a partir de aquí
     renderAlerts(sys, s);
     draw();
   }
@@ -234,7 +236,27 @@ export async function render(el, app) {
     box.innerHTML = alerts.map(([k, ti, d]) => `<div class="alert ${k}">${ico(k === "info" ? "info" : "alert")}<div><b>${esc(ti)}</b><p class="small">${esc(d)}</p></div></div>`).join("");
   }
 
+  // ------------------------------------------------------------ estadísticas en tiempo real (cada 2 s, sin redibujar)
+  const setW = (id, v, sub) => {
+    const w = dash.querySelector(`[data-id="${id}"]`);
+    if (!w) return;
+    const vv = w.querySelector(".v"); if (vv && vv.textContent !== v) { vv.textContent = v; vv.classList.remove("tick"); void vv.offsetWidth; vv.classList.add("tick"); }
+    if (sub != null) { const sb = w.querySelector(".l .small"); if (sb) sb.textContent = sub; }
+  };
+  const live = new EventSource("/api/stats/live");
+  live.onmessage = (ev) => {
+    if (!data || !base || editing) return;
+    const L = JSON.parse(ev.data);
+    const total = data.s.total + Math.max(0, L.total - base.total), blocked = data.s.blocked + Math.max(0, L.blocked - base.blocked);
+    setW("st_queries", num(total));
+    setW("st_blocked", num(blocked), `${pct(total ? (blocked / total) * 100 : 0)} ${t("del total")}`);
+    setW("st_response", ms(L.avg_response_ms), `${pct(L.hit_ratio)} ${t("desde caché")}`);
+    if (L.inet_ms != null) setW("st_latency", ms(L.inet_ms));
+    setW("st_devices", `${L.online}/${L.devices}`);
+    setW("st_qps", String(L.qps ?? 0), `${num(L.total)} ${t("desde el arranque")}`);
+    setW("st_cache", pct(L.hit_ratio));
+  };
   await load();
-  const timer = setInterval(() => { if (!editing) load().catch(() => {}); }, 15000);
-  return () => { clearInterval(timer); charts.forEach((c) => c.destroy()); };
+  const timer = setInterval(() => { if (!editing) load().catch(() => {}); }, 30000);  // gráficas y listas
+  return () => { clearInterval(timer); live.close(); charts.forEach((c) => c.destroy()); };
 }

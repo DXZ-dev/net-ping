@@ -293,16 +293,17 @@ export async function render(el) {
         pane.innerHTML = `<div class="card flat mb"><h4 class="mb">${t("Velocidad actual")}</h4><div class="grid g2">
           <div class="big-metric"><div class="v" id="rx">${fmtRate(full.rate?.rx_bps) || "—"}</div><div class="l">↓ ${t("Bajada")}</div></div>
           <div class="big-metric"><div class="v" id="tx">${fmtRate(full.rate?.tx_bps) || "—"}</div><div class="l">↑ ${t("Subida")}</div></div></div>
-          ${full.rate ? "" : `<p class="small muted mt">${t("La velocidad por dispositivo se mide cuando el tráfico pasa por Bipon (Router y firewall → Modo router).")}</p>`}</div>
+          ${full.rate ? "" : `<p class="small muted mt">${t("La velocidad en vivo de este equipo no está disponible: Bipon sólo mide el tráfico que pasa por él (Proxmox, este equipo o el modo router).")}</p>`}</div>
           <form id="lim" class="card flat"><h4 class="mb">${t("Limitar velocidad")}</h4>
           <div class="form-grid"><label class="field">${t("Bajada máx. (Mbps)")}<input type="number" step="0.1" min="0" name="down" value="${full.limit_down || ""}" placeholder="${t("sin límite")}"></label>
           <label class="field">${t("Subida máx. (Mbps)")}<input type="number" step="0.1" min="0" name="up" value="${full.limit_up || ""}" placeholder="${t("sin límite")}"></label></div>
           <div class="row mt"><button class="btn primary">${ico("check")}${t("Aplicar")}</button><button type="button" class="btn ghost" id="nolim">${t("Quitar límite")}</button></div>
-          <p class="small muted mt">${t("Requiere que Bipon haga de router (los límites se aplican con control de tráfico del sistema).")}</p></form>`;
+          <p class="small muted mt" id="lim-how">…</p></form>`;
+        api.get("/speedctl").then((sc) => { const m = sc.methods[mac]; const el = pane.querySelector("#lim-how"); if (el) el.textContent = m ? `${t("Se aplica con")}: ${t(sc.labels[m])}` : t("Tu router no permite controlar la velocidad desde fuera: el límite se guarda y se aplicará al conectar un MikroTik/OpenWrt en «Mi router» o al activar el modo router."); }).catch(() => {});
         const f = pane.querySelector("#lim");
         const send = async (down, up) => {
           const r = await api.patch(`/devices/${encodeURIComponent(mac)}/limit`, { limit_down: down, limit_up: up });
-          toast(r.message || t("Límite aplicado"), r.applied === null ? "info" : "ok", 6000); load();
+          toast(r.message || t("Límite aplicado"), r.ok === false ? "error" : r.applied ? "ok" : "info", 7000); load();
         };
         f.onsubmit = (e) => { e.preventDefault(); busy(f.querySelector(".primary"), () => send(f.down.value || null, f.up.value || null)).catch(() => {}); };
         pane.querySelector("#nolim").onclick = () => send(null, null).catch(toastErr);
