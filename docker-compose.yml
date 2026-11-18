@@ -17,8 +17,10 @@ services:
     # en el puerto 53 de la IP real, Wake-on-LAN, UPnP y VPN.
     network_mode: host
     restart: unless-stopped
+    # Para usar Bipon como puerta de enlace, multi-WAN o anti-lag, activa el reenvío en el ANFITRIÓN
+    # (Docker monta /proc/sys como solo lectura):  echo net.ipv4.ip_forward=1 | sudo tee /etc/sysctl.d/99-bipon.conf && sudo sysctl --system
     cap_add:
-      - NET_ADMIN        # VPN (wg-quick, OpenVPN, Tailscale), iptables, QoS
+      - NET_ADMIN        # VPN (wg-quick, OpenVPN, Tailscale), nftables, rutas por línea (multi-WAN), colas (anti-lag)
       - NET_RAW          # ping / traceroute
       - NET_BIND_SERVICE # puerto 53
     devices:

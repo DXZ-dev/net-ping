@@ -13,7 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       unbound unbound-anchor dns-root-data \
-      iputils-ping traceroute whois iproute2 iptables nftables conntrack \
+      iputils-ping traceroute mtr-tiny whois iproute2 iptables nftables conntrack \
       wireguard-tools openvpn \
       ca-certificates curl gnupg tzdata procps openssh-client \
  && if [ "$WITH_TAILSCALE" = "1" ]; then \

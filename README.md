@@ -81,6 +81,9 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 - **Vigilante de lag**: ping en vivo, picos con su posible culpable, **«Proteger mi partida»** y **preferencia IPv4**.
 - **Calidad de conexión**: Wi-Fi débil por equipo, mapa de lag por hora, ruta a tu juego e **informe para reclamar al proveedor**.
 - **Test de velocidad** con nota de **bufferbloat** (A+ a F).
+- **Anti-lag con la red cargada (SQM)**: CAKE con «Medir y ajustar»; el ping no se dispara aunque alguien descargue.
+- **Prioridad del tráfico** (DSCP/WMM): juegos y llamadas → streaming → navegación → descargas grandes.
+- **Ruta salto a salto** (mtr) con el operador de cada salto: dice si el lag empieza en tu casa, tu proveedor o más allá.
 
 </td><td valign="top">
 
@@ -89,6 +92,8 @@ Filtrado DNS al estilo **Pi-hole**, control por aplicaciones y perfiles al estil
 - **Modo automático** (IPv6 RDNSS): Bipon sin tocar el router; si se apaga, la red sigue con el DNS del router.
 - **Servidor DHCP** (único o **principal con el del router de respaldo**), zonas/VLAN, **router y firewall** (nftables) con reversión automática.
 - **Asistente «Bipon como puerta de enlace»**: control total de cable y Wi-Fi con un solo cable, sin tocar el router del proveedor.
+- **Multi-WAN**: varias conexiones a Internet con **respaldo automático**, **reparto de carga** por dispositivo (según consumo) o por conexión, y **juegos por la línea con menos ping**.
+- **Interfaces de red**: cada tarjeta con su estado, velocidad de enlace y tráfico; DHCP/IP fija/MTU, **VLAN** y **añadir tarjetas en Proxmox** desde el panel.
 - **Acceso al router** (OpenWrt, MikroTik, FRITZ!Box) sin tocar la configuración del ISP.
 - **NAT**: tipo de NAT (RFC 5780 / consola), estados y sesiones; UPnP.
 - **Puertos TCP/UDP** en uso y qué aplicación los usa.
@@ -241,6 +246,29 @@ Internet ── router del proveedor (módem + Wi-Fi + switch, sin cambios)
 
 Para que los juegos tengan **NAT abierto**, pon la IP de Bipon en la **DMZ** del router y crea la redirección de puertos de la consola en Bipon.
 
+### 🔀 Multi-WAN: dos (o más) proveedores trabajando juntos
+
+Con Bipon como puerta de enlace, *Conexión → Multi-WAN* añade más líneas de Internet:
+
+| Segunda línea | Cómo conectarla |
+|---|---|
+| Otro router (otro proveedor, 4G/5G con Wi-Fi) | En la **misma red**, con otra IP (p. ej. `192.168.18.2`) y su DHCP apagado. Un solo cable. |
+| Módem USB o el móvil (anclaje USB) | Al servidor Proxmox → puente `vmbr1` → *Interfaces de red → Añadir tarjeta en Proxmox*. |
+| Segunda tarjeta de red | Conecta el otro proveedor y elige esa interfaz con puerta de enlace «auto». |
+
+- **Respaldo automático**: si la línea principal cae (o su ping/pérdida se disparan), todo pasa a la siguiente en ~6-10 s y vuelve cuando la principal está estable. Las líneas inestables deben demostrar más tiempo estable antes de volver a usarse.
+- **Reparto de carga**: por dispositivo según su consumo real y el peso de cada línea (ninguna web ve cambiar tu IP) o por conexión.
+- **Juegos, llamadas y consolas** por la línea con menos ping en ese momento, con histéresis para no saltar a mitad de partida.
+- **Línea por dispositivo**, aviso por Telegram de cada caída y vuelta, botón **«Simular caída 60 s»** para probarlo.
+
+### 🧘 Anti-lag y prioridad
+
+*Conexión → Anti-lag y prioridad* (requiere Bipon como puerta de enlace):
+
+1. **Medir y ajustar**: mide tu línea y deja el tráfico al ~90 % de su velocidad real; la cola se forma en Bipon, donde **CAKE** la ordena por equipo y por conexión (con un solo cable separa bajada y subida en la misma interfaz).
+2. **Prioridad** (DSCP, que también usa el Wi-Fi WMM de tu punto de acceso): juegos y consolas (CS4) y llamadas (EF) primero, streaming (AF41, reconocido por su DNS) después, navegación normal y las **descargas grandes, actualizaciones, copias en la nube y torrents** al final (CS1).
+3. Comprueba la nota con un test de bufferbloat desde tu PC: debería ser **A/A+**.
+
 ---
 
 ## 🌍 CGNAT, puertos cerrados y acceso remoto
@@ -263,6 +291,10 @@ Para que los juegos tengan **NAT abierto**, pon la IP de Bipon en la **DMZ** del
 - Por defecto el panel y el DNS sólo responden a la **red local + VPN** (*Usuarios y acceso → Acceso local/externo*). **No expongas los puertos 8080 ni 53 a Internet.**
 - Las configuraciones VPN importadas rechazan scripts (`PostUp`, `up`…); las claves privadas se guardan con permisos 600.
 - El modo router aplica cambios con **reversión automática a los 60 s** si no los confirmas.
+- **Firewall de entrada**: con Bipon de puerta de enlace, el panel, el DNS, Unbound y el SSH solo responden a la red local y a las VPN, aunque pongas Bipon en la **DMZ** del router para tener NAT abierto.
+- **Límite de consultas DNS por equipo** (200/s, ráfaga 1000): un equipo infectado o una app en bucle no satura el DNS de toda la casa; se avisa por Telegram.
+- **Protección contra suplantación del router (ARP)**: recuerda la MAC del router y avisa si otro equipo intenta hacerse pasar por él o por Bipon.
+- **DNS rebinding** bloqueado, **paquetes inválidos** descartados y **MSS** ajustado al MTU de cada línea (módems 4G/PPPoE).
 
 ---
 

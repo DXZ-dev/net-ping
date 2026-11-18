@@ -77,7 +77,7 @@ sysctl -q -p /etc/sysctl.d/99-bipon-net.conf || true
 
 # módulos del kernel que el contenedor usa (un LXC sin privilegios no puede cargarlos por sí mismo):
 # firewall/NAT del modo router, conntrack, límites de velocidad (HTB, fq_codel, IFB) y anti-bufferbloat (CAKE)
-MODS="nf_tables nft_nat nft_masq nft_ct nf_conntrack nf_nat sch_htb sch_fq_codel sch_cake ifb act_mirred cls_u32 tun wireguard"
+MODS="nf_tables nft_nat nft_masq nft_ct nf_conntrack nf_nat nf_flow_table nft_flow_offload sch_htb sch_fq_codel sch_cake ifb act_mirred cls_u32 cls_fw 8021q tun wireguard"
 : > /etc/modules-load.d/bipon-net.conf
 for m in $MODS; do
   if modprobe "$m" 2>/dev/null; then echo "$m" >> /etc/modules-load.d/bipon-net.conf; fi

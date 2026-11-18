@@ -16,6 +16,7 @@ export async function render(el) {
   const charts = [];
   el.innerHTML = `
     <div class="card mb" id="q-lan"></div>
+    <div class="card mb" id="q-trace"></div>
     <div class="card mb" id="q-heat"></div>
     <div class="grid g2">
       <div class="card" id="q-route"></div>
@@ -76,6 +77,29 @@ export async function render(el) {
     boxRoute.querySelector("#rt-reg").onchange = (e) => api.post("/quality/route", { game_region: e.target.value }).then((x) => { toast(t("Guardado")); drawRoute(x); }).catch(() => {});
   };
   await drawRoute();
+
+  // ------------------------------------------------------------ ruta salto a salto (MTR)
+  const boxTr = el.querySelector("#q-trace");
+  const SEG = { casa: ["info", "Tu casa"], proveedor: ["warn", "Tu proveedor"], internet: ["", "Internet / destino"], "?": ["", "Sin identificar"] };
+  const CUL = { casa: "err", proveedor: "warn", internet: "warn" };
+  const drawTrace = async (fresh) => {
+    const s = fresh ? { ...(await api.get("/quality/trace")), latest: fresh.latest } : await api.get("/quality/trace");
+    const sum = s.summary?.culprits || {};
+    boxTr.innerHTML = `<header><h2>${ico("network")}${t("Ruta salto a salto")}</h2><button class="btn sm" id="tr-run" ${s.available ? "" : "disabled"}>${ico("activity")}${t("Medir ahora")}</button></header>
+      <p class="muted small mb">${t("Cada 15 minutos Bipon sigue el camino de tus paquetes router a router (como mtr) e identifica a qué operador pertenece cada salto. Así se ve si el lag empieza en tu casa, en tu proveedor o más allá. Un salto lento que no se mantiene hasta el destino se ignora (muchos routers responden lento a propósito a estas pruebas).")}</p>
+      ${!s.available ? `<div class="alert warn small">${ico("alert")}<div>${t("Falta la herramienta mtr: se instala al actualizar Bipon (paquete mtr-tiny).")}</div></div>` : ""}
+      ${s.summary?.runs ? `<p class="small mb">${t("Últimos 7 días")}: ${s.summary.runs} ${t("mediciones")} · ${t("culpa de tu casa")} ${sum.casa || 0} · ${t("de tu proveedor")} ${sum.proveedor || 0} · ${t("de Internet")} ${sum.internet || 0}</p>` : ""}
+      ${(s.latest || []).length ? (s.latest || []).map((r) => `<div class="rec mt">
+        <div class="row between"><b>${esc(t(r.label || r.target))}${r.wan ? ` · ${esc(r.wan)}` : ""}</b><span class="small muted">${r.ts ? ago(r.ts) : ""}${r.isp ? " · " + esc(r.isp) : ""}</span></div>
+        <div class="alert ${r.culprit ? CUL[r.culprit] || "warn" : "ok"} small mt">${ico(r.culprit ? "alert" : "check")}<div>${esc(r.verdict)}</div></div>
+        <div class="table-wrap mt"><table class="small"><thead><tr><th>#</th><th>IP</th><th>${t("Operador")}</th><th>${t("Tramo")}</th><th>${t("Media")}</th><th>${t("Peor")}</th><th>${t("Pérdida")}</th></tr></thead><tbody>
+          ${r.hops.map((h) => { const [c, l] = SEG[h.segment] || SEG["?"]; return `<tr ${h.hop === r.lag_hop || h.hop === r.loss_hop ? 'style="background:rgba(239,68,68,.12)"' : ""}>
+            <td>${h.hop}</td><td class="mono">${esc(h.ip || "* * *")}</td><td>${esc(h.org || (h.asn ? "AS" + h.asn : ""))}</td><td><span class="badge ${c}">${t(l)}</span></td>
+            <td>${ms(h.avg)}</td><td>${ms(h.worst)}</td><td>${h.loss ? h.loss + " %" : "0"}</td></tr>`; }).join("")}</tbody></table></div></div>`).join("")
+        : `<p class="muted small">${t("Aún no hay mediciones: pulsa «Medir ahora» (tarda unos 10 s).")}</p>`}`;
+    boxTr.querySelector("#tr-run").onclick = (e) => busy(e.currentTarget, () => api.post("/quality/trace")).then(drawTrace).catch(() => {});
+  };
+  await drawTrace().catch(() => { boxTr.innerHTML = ""; });
 
   // ------------------------------------------------------------ informe para el proveedor
   const rep = await api.get("/quality/report?days=30");

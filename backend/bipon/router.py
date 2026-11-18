@@ -109,7 +109,11 @@ class RouterManager:
                 if not ip or ip in (self_ip, devices.gateway) or ip in acct or mac.startswith("ip:"):
                     continue
                 acct[ip] = mac
-        fast = bool(fastpath and c.get("fastpath", True) and not acct and lan_ifs)
+        from . import qos as _qos
+        mw0 = getattr(self.ctx, "multiwan", None)
+        # la ruta rápida se salta el firewall tras el primer paquete: incompatible con marcar prioridad (DSCP) o elegir línea
+        fast = bool(fastpath and c.get("fastpath", True) and not acct and lan_ifs and not _qos.cfg(self.ctx).get("dscp")
+                    and not (mw0 is not None and mw0.active))
         lines = ["table inet bipon {"]
         for ip, mac in acct.items():
             key = mac.replace(":", "")
@@ -122,9 +126,23 @@ class RouterManager:
         if fast:
             devs = ", ".join(f'"{i}"' for i in dict.fromkeys(lan_ifs + ([c["wan"]] if c.get("wan") else [])))
             lines.append(f"  flowtable ft {{ hook ingress priority 0; devices = {{ {devs} }}; }}")
+        mw = getattr(self.ctx, "multiwan", None)
+        consoles = [(m, d.get("ip")) for m, d in devices.devices.items() if d.get("kind") == "console" and not m.startswith("ip:")]
+        lan_net_any = self._iface_net(c.get("lan")) if c.get("lan") else None
+        if mw is not None:
+            lines += mw.nft_lines(lan_ifs, lan_net_any, [m for m, _ in consoles])
+        from . import qos
+        lines += qos.dscp_lines(self.ctx, [m for m, _ in consoles], [ip for _, ip in consoles if ip])
         lines.append(f"  set blocked_macs {{ type ether_addr; {('elements = { ' + ', '.join(blocked_macs) + ' };') if blocked_macs else ''} }}")
+        lines += self._input_lines(dns_port)
         lines.append("  chain forward {")
         lines.append("    type filter hook forward priority -10; policy accept;")
+        lines.append("    ct state invalid counter drop comment \"paquetes inválidos\"")
+        wan_ifs = [i for i in dict.fromkeys([c.get("wan"), *(mw.wan_ifaces() if mw is not None else [])]) if i]
+        if wan_ifs:
+            ifs = "{ " + ", ".join(f'"{i}"' for i in wan_ifs) + " }"
+            # MSS al MTU real de la salida: evita cortes y webs que «se quedan cargando» con módems 4G/PPPoE (MTU < 1500)
+            lines.append(f"    oifname {ifs} tcp flags syn tcp option maxseg size set rt mtu")
         lines.append("    ether saddr @blocked_macs counter drop comment \"Internet bloqueado (control parental)\"")
         for z in c.get("zones", []):
             net = ipaddress.ip_interface(z["address"]).network
@@ -157,6 +175,10 @@ class RouterManager:
         lines.append("  }")
         lines.append("  chain postrouting {")
         lines.append("    type nat hook postrouting priority srcnat; policy accept;")
+        extra_wans = [i for i in (mw.wan_ifaces() if mw is not None else []) if i not in (c.get("wan"), c.get("lan"))]
+        if c.get("nat") and extra_wans:
+            # líneas extra del multi-WAN con su propia interfaz (módem USB, segunda tarjeta)
+            lines.append(f"    oifname {{ {', '.join(f'{chr(34)}{i}{chr(34)}' for i in dict.fromkeys(extra_wans))} }} masquerade comment \"multi-WAN\"")
         if c.get("nat") and c.get("wan"):
             if one_arm and lan_net:
                 # puerta de enlace con un solo cable: lo que sale hacia el router del proveedor se enmascara con la IP de
@@ -167,6 +189,40 @@ class RouterManager:
         lines.append("  }")
         lines.append("}")
         return "\n".join(lines) + "\n"
+
+    def _input_lines(self, dns_port: int) -> list[str]:
+        """Servicios del propio Bipon (panel, DNS, Unbound, SSH): sólo desde la red local y las VPN.
+        Protege aunque pongas Bipon en la DMZ del router para tener NAT abierto en las consolas."""
+        from .config import WEB_PORT
+        st = self.ctx.settings
+        acc = (st.get("access") or {})
+        tls_cfg = st.get("tls") or {}
+        tcp = {22, int(st.get("unbound.port", 5335) or 5335), 8953}
+        udp = {int(st.get("unbound.port", 5335) or 5335), 67}
+        if acc.get("web", "local_vpn") != "any":
+            tcp |= {int(WEB_PORT), int(tls_cfg.get("port", 8443) or 8443)}
+        if acc.get("dns", "local_vpn") not in ("any", "custom"):
+            tcp |= {int(dns_port), int(tls_cfg.get("dot_port", 853) or 853)}
+            udp |= {int(dns_port)}
+        v6 = ["fe80::/10", "fc00::/7"]
+        for itf in netinfo.run_json(["ip", "-j", "-6", "addr", "show", "scope", "global"]) or []:
+            for a in itf.get("addr_info", []):
+                try:
+                    v6.append(str(ipaddress.ip_interface(f"{a['local']}/{a['prefixlen']}").network))
+                except Exception:
+                    pass
+        tl = ", ".join(str(p) for p in sorted(tcp))
+        ul = ", ".join(str(p) for p in sorted(udp))
+        v6s = ", ".join(dict.fromkeys(v6))
+        return ["  chain input {",
+                "    type filter hook input priority filter; policy accept;",
+                "    ct state established,related accept",
+                "    iif \"lo\" accept",
+                f"    ip saddr != {PRIVATE} tcp dport {{ {tl} }} counter drop comment \"Internet → servicios de Bipon\"",
+                f"    ip saddr != {PRIVATE} udp dport {{ {ul} }} counter drop comment \"Internet → servicios de Bipon\"",
+                f"    ip6 saddr != {{ {v6s} }} tcp dport {{ {tl} }} counter drop",
+                f"    ip6 saddr != {{ {v6s} }} udp dport {{ {ul} }} counter drop",
+                "  }"]
 
     @staticmethod
     def _iface_net(iface: str | None) -> str | None:
@@ -221,6 +277,7 @@ class RouterManager:
             self.ctx.settings.set("router", c, notify=False)
             return {"ok": True, "message": "Modo router desactivado (reglas eliminadas)"}
         for path, val in [("/proc/sys/net/ipv4/ip_forward", "1"), ("/proc/sys/net/ipv4/conf/all/send_redirects", "0"),
+                          ("/proc/sys/net/netfilter/nf_conntrack_acct", "1"),  # bytes por conexión: descargas grandes → baja prioridad
                           *([(f"/proc/sys/net/ipv4/conf/{c['lan']}/send_redirects", "0")] if c.get("lan") else [])]:
             try:
                 with open(path, "w") as fh:
@@ -238,6 +295,9 @@ class RouterManager:
                 ok, out = await self._load(text)
             if ok:
                 self._loaded_text = text
+                mw = getattr(self.ctx, "multiwan", None)
+                if mw is not None and mw.active:
+                    await mw.sync_routes()
         if not ok:
             self.last_error = out
             return {"ok": False, "message": out}
@@ -279,63 +339,21 @@ class RouterManager:
         return await _run("tc", *args)
 
     async def apply_shaping(self, c: dict | None = None) -> dict:
-        """Límite de bajada/subida por dispositivo.
-        Bajada: HTB en la salida de la interfaz LAN (tráfico hacia el equipo).
-        Subida: la entrada de la LAN se redirige a ifb0 y allí se aplica HTB."""
-        c = c or self.cfg()
-        sh = c.get("shaping") or {}
-        lan = sh.get("iface") or c.get("lan")
-        if not shutil.which("tc"):
-            raise RuntimeError("tc (iproute2) no está instalado")
-        if not lan or not IFACE_RE.match(lan):
-            raise ValueError("Indica la interfaz LAN")
-        # limpiar estado anterior
-        await self._tc("qdisc", "del", "dev", lan, "root")
-        await self._tc("qdisc", "del", "dev", lan, "ingress")
-        await _run("ip", "link", "del", "ifb0")
-        if not sh.get("enabled"):
-            self.shaped = {}
-            return {"ok": True, "message": "Límites de velocidad desactivados"}
-        total_down = float(sh.get("down_mbit") or 1000)
-        total_up = float(sh.get("up_mbit") or 1000)
-        limited = [(m, d) for m, d in self.ctx.devices.devices.items() if d.get("ip") and (d.get("limit_down") or d.get("limit_up"))]
-        errors = []
+        """Límites por dispositivo + anti-lag (SQM). La lógica vive en qos.py (única dueña de tc)."""
+        from . import qos
+        res = await qos.apply(self.ctx)
+        if not res.get("ok") and "no está instalado" in res.get("message", ""):
+            raise RuntimeError(res["message"])
+        return res
 
-        async def build(dev: str, total: float, key: str, match: str):
-            cmds = [["qdisc", "replace", "dev", dev, "root", "handle", "1:", "htb", "default", "9999", "r2q", "100"],
-                    ["class", "replace", "dev", dev, "parent", "1:", "classid", "1:1", "htb", "rate", f"{total}mbit", "ceil", f"{total}mbit"],
-                    ["class", "replace", "dev", dev, "parent", "1:1", "classid", "1:9999", "htb", "rate", f"{max(1.0, total * 0.5)}mbit",
-                     "ceil", f"{total}mbit", "prio", "1"],
-                    ["qdisc", "replace", "dev", dev, "parent", "1:9999", "fq_codel"]]
-            for i, (mac, d) in enumerate(limited, start=10):
-                lim = d.get(key)
-                if not lim:
-                    continue
-                cid = f"1:{i}"
-                cmds += [["class", "replace", "dev", dev, "parent", "1:1", "classid", cid, "htb", "rate", f"{float(lim)}mbit",
-                          "ceil", f"{float(lim)}mbit", "prio", "2"],
-                         ["qdisc", "replace", "dev", dev, "parent", cid, "fq_codel"],
-                         ["filter", "add", "dev", dev, "parent", "1:", "protocol", "ip", "prio", "1", "u32", "match", "ip", match,
-                          f"{d['ip']}/32", "flowid", cid]]
-                self.shaped[mac] = {**self.shaped.get(mac, {}), key: float(lim), f"class_{key}": cid}
-            for cmd in cmds:
-                code, out = await self._tc(*cmd)
-                if code != 0:
-                    errors.append(f"tc {' '.join(cmd[:4])}: {out.strip()[:120]}")
-        self.shaped = {}
-        await build(lan, total_down, "limit_down", "dst")
-        code, out = await _run("ip", "link", "add", "ifb0", "type", "ifb")
-        if code != 0 and "exists" not in out:
-            errors.append(f"ifb0: {out.strip()} (¿módulo ifb disponible?)")
-        else:
-            await _run("ip", "link", "set", "ifb0", "up")
-            await self._tc("qdisc", "add", "dev", lan, "handle", "ffff:", "ingress")
-            await self._tc("filter", "add", "dev", lan, "parent", "ffff:", "protocol", "ip", "u32", "match", "u32", "0", "0",
-                           "action", "mirred", "egress", "redirect", "dev", "ifb0")
-            await build("ifb0", total_up, "limit_up", "src")
-        if errors:
-            self.last_error = "; ".join(errors[:3])
-        return {"ok": not errors, "message": "Límites aplicados" if not errors else self.last_error, "devices": len(limited)}
+    def _shape_signature(self) -> tuple:
+        from . import qos
+        sq = qos.cfg(self.ctx)
+        mw = getattr(self.ctx, "multiwan", None)
+        devs = sorted((m, d.get("ip"), d.get("limit_down"), d.get("limit_up")) for m, d in self.ctx.devices.devices.items()
+                      if d.get("limit_down") or d.get("limit_up"))
+        return (bool((self.cfg().get("shaping") or {}).get("enabled")), devs, bool(sq.get("enabled")), qos.rates(self.ctx, sq),
+                tuple((w["iface"], w.get("up_mbit")) for w in (mw.wans() if mw and mw.active else [])))
 
     async def enforce_now(self, macs: list[str] | None = None) -> None:
         """Aplica al instante el bloqueo de Internet y corta las conexiones abiertas de los dispositivos bloqueados."""
@@ -393,12 +411,10 @@ class RouterManager:
                     if time.time() - refreshed > 120:
                         refreshed = time.time()
                         await self.apply(c, confirm_required=False)
-                        if (c.get("shaping") or {}).get("enabled"):
-                            sig = sorted((m, d.get("ip"), d.get("limit_down"), d.get("limit_up")) for m, d in self.ctx.devices.devices.items()
-                                         if d.get("limit_down") or d.get("limit_up"))
-                            if sig != getattr(self, "_shape_sig", None):
-                                self._shape_sig = sig
-                                await self.apply_shaping(c)
+                        sig = self._shape_signature()
+                        if sig != getattr(self, "_shape_sig", None):
+                            self._shape_sig = sig
+                            await self.apply_shaping(c)
                     if c.get("accounting"):
                         now = time.time()
                         counters = await self.read_counters()

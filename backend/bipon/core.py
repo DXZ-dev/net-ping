@@ -68,6 +68,14 @@ class Context:
         self.sync = SyncManager(self)
         self.wifi = WifiManager(self)
         self.router = RouterManager(self)
+        from .multiwan import MultiWAN
+        self.multiwan = MultiWAN(self)
+        from .qos import Classifier
+        from .trace import Tracer
+        self.classifier = Classifier(self)
+        from .ifaces import Interfaces
+        self.ifaces = Interfaces(self)
+        self.tracer = Tracer(self)
         from .liverates import LiveRates
         self.rates = LiveRates(self)
         from .speedctl import SpeedControl
@@ -105,6 +113,12 @@ class Context:
         self.dns.on_query = self._log_query
         self.dns.on_client = self.devices.track_client
         self.dns.on_usage = self.family.record
+        self.dns.on_answer = self.classifier.on_answer
+        self.dns.on_flood = self._dns_flood
+        self.dns.rate_exempt = self._dns_rate_exempt
+        from .security import ArpGuard
+        self.arpguard = ArpGuard(self)
+        self.devices.on_neigh = self.arpguard.observe
         self.dns.on_threat = self.security.threat_hit
         self.dns.name_lookup = self.dhcp.lookup_name
         self.devices.family = self.family
@@ -135,6 +149,22 @@ class Context:
             row = (row[0], h(row[1]), *row[2:8])
             mac = h(mac) if mac else None
         self.db.log_query((*row[:8], mac))
+
+    def _dns_rate_exempt(self, ip: str) -> bool:
+        """Reenviadores (router del proveedor, Pi-hole, otro DNS) agrupan las consultas de muchos equipos."""
+        if ip == self.devices.gateway:
+            return True
+        return ip in set((self.settings.get("dns") or {}).get("rate_exempt") or [])
+
+    def _dns_flood(self, ip: str, qps: int) -> None:
+        dev = self.devices.devices.get(self.devices.ip_to_mac.get(ip, ""), {}) if hasattr(self.devices, "ip_to_mac") else {}
+        who = dev.get("name") or dev.get("hostname") or ip
+        msg = f"{who} hace más de {qps} consultas DNS por segundo: se limitan para proteger la red (¿malware o una app en bucle?)."
+        self.db.event("warning", "seguridad", msg)
+        try:
+            self.notify.emit("anomaly", "Exceso de consultas DNS", msg, key=f"flood:{ip}")
+        except Exception:  # pragma: no cover
+            pass
 
     def _new_device(self, d: dict) -> None:
         if not self.devices.last_scan:  # el primer escaneo descubre toda la red: no se avisa de cada equipo
@@ -181,6 +211,8 @@ class Context:
         self.dns.prefer_ipv4 = bool(d.get("prefer_ipv4", False))
         self.dns.cname_check = bool(d.get("cname_check", True))
         self.dns.prefetch = bool(d.get("prefetch", True))
+        self.dns.client_qps = max(0, int(d.get("client_qps", 200) or 0))
+        self.dns.client_burst = max(50, int(d.get("client_burst", 1000) or 1000))
         self.dns.cf = d.get("conditional_forwarding") or {}
         self.dns.set_local_records(d.get("local_records") or [])
         dom = ((self.settings.get("dhcp") or {}).get("domain") or "lan").lower()
@@ -199,6 +231,10 @@ class Context:
 
     async def start(self) -> None:
         self.lists.seed_defaults()
+        try:
+            await self.ifaces.apply_all()  # VLAN e IP guardadas en «Interfaces de red»
+        except Exception as exc:  # pragma: no cover
+            log.warning("interfaces: %s", exc)
         await self.unbound.start()
         self.apply_dns_settings()
         self.apply_blocking()
@@ -240,6 +276,8 @@ class Context:
         self._bg(self.sync.loop(), "sincronización")
         self._bg(self.wifi.loop(), "wifi")
         self._bg(self.router.loop(), "router")
+        self._bg(self.multiwan.loop(), "multi-WAN")
+        self._bg(self.tracer.loop(), "ruta salto a salto")
         self._bg(self.rates.loop(), "velocidad en vivo")
         self._bg(self.lag.loop(), "vigilante de lag")
         self._bg(self.cacheguard.loop(), "guardián de caché")

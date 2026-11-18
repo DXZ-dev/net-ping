@@ -46,8 +46,10 @@ export async function render(el, app) {
     </div>
     <div class="card mt" id="quarantine"></div>
     <div class="grid g2 mt"><div class="card" id="bypass"></div><div class="card" id="upnp"></div></div>
-    <div class="card mt" id="intruders"></div>`;
+    <div class="card mt" id="intruders"></div>
+    <div class="card mt" id="arp"></div>`;
   drawIntruders(el.querySelector("#intruders"));
+  drawArp(el.querySelector("#arp"));
   drawQuarantine(el.querySelector("#quarantine"));
   drawBypass(el.querySelector("#bypass"));
   drawUpnp(el.querySelector("#upnp"));
@@ -64,6 +66,23 @@ export async function render(el, app) {
 
 const stat = (l, v, tint, icon) => `<div class="card stat"><div class="ic tint-${tint}">${ico(icon)}</div><div><div class="v">${esc(v)}</div><div class="l">${t(l)}</div></div></div>`;
 const opt = (k, ti, d, v) => `<div class="opt"><div class="t"><b>${t(ti)}</b><span>${t(d)}</span></div>${toggle(k, v, `data-opt="${k}"`)}</div>`;
+
+// Guardián ARP: alguien se hace pasar por el router o por Bipon (man in the middle)
+async function drawArp(box) {
+  if (!box) return;
+  const s = await api.get("/security/arp").catch(() => null);
+  if (!s) { box.remove(); return; }
+  const known = Object.entries(s.known || {});
+  const pending = Object.entries(s.pending || {});
+  box.innerHTML = `<header><h2>${ico("shield")}${t("Protección contra suplantación del router (ARP)")}</h2>
+    <span class="badge ${s.alerts.length ? "err" : "ok"}">${s.alerts.length ? t("Alertas") + ": " + s.alerts.length : t("Sin incidentes")}</span></header>
+    <p class="muted small">${t("Bipon recuerda la MAC de tu router y avisa si otro equipo intenta hacerse pasar por él (o por Bipon) para espiar el tráfico o meter lag a toda la casa.")}</p>
+    ${known.length ? `<dl class="kv small mt">${known.map(([ip, mac]) => `<dt>${esc(ip)}</dt><dd class="mono">${esc(mac)}</dd>`).join("")}</dl>` : `<p class="small muted mt">${t("Aprendiendo la MAC del router…")}</p>`}
+    ${pending.map(([ip, p]) => `<div class="alert warn small mt">${ico("alert")}<div>${t("El router")} ${esc(ip)} ${t("responde con otra MAC")}: <span class="mono">${esc(p.mac)}</span>.
+      ${t("Si acabas de cambiar de router, confírmalo; si no, revisa qué equipo es.")}<div class="mt"><button class="btn sm" data-arp="${esc(ip)}">${ico("check")}${t("Es mi router nuevo")}</button></div></div></div>`).join("")}
+    ${s.alerts.slice(0, 5).map((a) => `<div class="small mt">⚠️ ${esc(a.message)} <span class="muted">· ${new Date(a.ts * 1000).toLocaleString()}</span></div>`).join("")}`;
+  box.querySelectorAll("[data-arp]").forEach((b) => (b.onclick = () => busy(b, () => api.post("/security/arp/accept", { ip: b.dataset.arp })).then(() => { toast(t("Guardado")); drawArp(box); }).catch(() => {})));
+}
 
 // Equipos conectados a tu línea con IP fuera de tu red local (IP fija para escaparse, otra VLAN, intruso)
 async function drawIntruders(box) {

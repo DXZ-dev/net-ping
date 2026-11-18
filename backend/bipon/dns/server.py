@@ -92,6 +92,14 @@ class DNSServer:
         self.prefer_ipv4 = False
         self.cname_check = True  # bloquea rastreadores camuflados tras un CNAME  # filtra AAAA (y HTTPS/SVCB con pistas IPv6): los equipos usan IPv4
         self.prefetch = True
+        self.on_answer = None  # callback(nombre, respuesta) para clasificar tráfico por DNS
+        # límite por cliente (cubo de fichas): un equipo infectado o en bucle no puede saturar el DNS de toda la casa
+        self.client_qps = 200
+        self.client_burst = 1000
+        self._buckets: dict[str, list[float]] = {}
+        self.flooding: dict[str, float] = {}
+        self.on_flood = None  # callback(ip, qps) — aviso, como mucho una vez cada 10 min por equipo
+        self.rate_exempt = lambda ip: False  # el router o un Pi-hole que reenvían por toda la casa no se limitan
         self.local: dict[tuple[str, int], list[str]] = {}
         self.cf = {"enabled": False, "domain": "", "server": ""}
         # métricas en memoria
@@ -213,11 +221,42 @@ class DNSServer:
         finally:
             writer.close()
 
+    def _take(self, ip: str) -> bool:
+        now = time.monotonic()
+        b = self._buckets.get(ip)
+        if b is None:
+            if len(self._buckets) > 20000:  # sin crecer sin límite ante IPs falsificadas
+                self._buckets.clear()
+            b = self._buckets[ip] = [float(self.client_burst), now]
+        b[0] = min(float(self.client_burst), b[0] + (now - b[1]) * self.client_qps)
+        b[1] = now
+        if b[0] >= 1:
+            b[0] -= 1
+            return True
+        last = self.flooding.get(ip, 0)
+        if now - last > 600:
+            self.flooding[ip] = now
+            if self.on_flood is not None:
+                try:
+                    self.on_flood(ip, self.client_qps)
+                except Exception:  # pragma: no cover
+                    pass
+        return False
+
     # ---- núcleo -------------------------------------------------------------
     async def handle(self, data: bytes, client_ip: str, tcp: bool = False) -> bytes | None:
         t0 = time.perf_counter()
         if client_ip.startswith("::ffff:"):
             client_ip = client_ip[7:]
+        if self.client_qps and client_ip not in ("127.0.0.1", "::1") and not self.rate_exempt(client_ip) and not self._take(client_ip):
+            if tcp:
+                try:
+                    r = DNSRecord.parse(data).reply()
+                    r.header.rcode = RCODE.REFUSED
+                    return r.pack()
+                except Exception:
+                    return None
+            return None  # UDP: se descarta en silencio (nunca se amplifica)
         try:
             req = DNSRecord.parse(data)
         except Exception:
@@ -254,6 +293,11 @@ class DNSServer:
                 trunc.header.tc = 1
                 out = trunc.pack()
 
+        if self.on_answer is not None and status not in BLOCKED_STATUSES and qtype == QTYPE.A:
+            try:
+                self.on_answer(name, out)  # clasificación de tráfico (streaming, descargas) para la prioridad
+            except Exception:  # pragma: no cover
+                pass
         elapsed = (time.perf_counter() - t0) * 1000
         self.total += 1
         self._cur_count += 1

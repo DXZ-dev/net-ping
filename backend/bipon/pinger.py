@@ -31,7 +31,8 @@ def summarize(times: list[float], sent: int) -> dict:
     return out
 
 
-async def ping(host: str, count: int = 3, interval: float = 0.2, timeout: float = 1.0) -> dict:
+async def ping(host: str, count: int = 3, interval: float = 0.2, timeout: float = 1.0, mark: int | None = None) -> dict:
+    """mark: marca de firewall (SO_MARK) para salir por una línea concreta del multi-WAN."""
     if not valid_host(host):
         raise ValueError("host inválido")
     count = max(1, min(count, 100))
@@ -40,6 +41,8 @@ async def ping(host: str, count: int = 3, interval: float = 0.2, timeout: float 
     args = ["ping", "-n", "-c", str(count), "-i", str(max(0.2, interval)), "-W", str(max(1, int(timeout))), host]
     if ":" in host:
         args.insert(1, "-6")
+    if mark is not None:
+        args[1:1] = ["-m", str(int(mark))]
     proc = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), count * max(0.2, interval) + timeout + 5)

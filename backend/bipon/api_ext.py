@@ -1423,6 +1423,11 @@ async def updates_put(request: Request, body: dict = Body(...)):
     import re as _re
     if not _re.match(r"^[\w.-]+/[\w.-]+$", cfg["repo"]):
         raise HTTPException(400, "Repositorio inválido (formato usuario/repositorio)")
+    # la rama llega a «git fetch»: nunca puede empezar por «-» (sería una opción de git)
+    if cfg.get("branch") and not _re.match(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$", str(cfg["branch"])):
+        raise HTTPException(400, "Rama inválida")
+    if not _re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(cfg.get("time") or "03:41")):
+        raise HTTPException(400, "Hora inválida (HH:MM)")
     c.settings.set("updates", cfg, notify=False)
     return c.updater.status()
 

@@ -113,7 +113,8 @@ def test_accounting_uses_hash_map_not_rule_per_device(monkeypatch):
 
 
 def test_fastpath_without_accounting_and_fallback(monkeypatch):
-    r, _ = make(monkeypatch)
+    r, ctx = make(monkeypatch)
+    ctx.settings["sqm"] = {"dscp": False}  # la prioridad DSCP necesita ver todos los paquetes: sin ella hay ruta rápida
     c = {**r.cfg(), "enabled": True, "wan": "eth0", "lan": "eth0", "accounting": False}
     assert "flow add @ft" in r.ruleset(c)
     assert "flowtable" not in r.ruleset(c, fastpath=False)
