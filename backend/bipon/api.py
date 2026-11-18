@@ -795,7 +795,7 @@ async def device_ports(request: Request, mac: str):
 # =====================================================================
 DNS_FIELDS = {"upstreams", "preset", "strategy", "timeout_ms", "cache_size", "cache_min_ttl", "cache_max_ttl", "optimistic_cache",
               "prefetch", "blocking_mode", "block_ttl", "log_queries", "block_doh_canary", "block_icloud_relay",
-              "conditional_forwarding", "local_records", "auto_optimize", "prefer_ipv4", "cname_check"}
+              "conditional_forwarding", "local_records", "auto_optimize", "prefer_ipv4", "cname_check", "client_qps", "rate_exempt"}
 
 
 @api.get("/dns")
@@ -820,6 +820,14 @@ async def dns_put(request: Request, body: dict = Body(...)):
             except Exception:
                 raise HTTPException(400, f"Servidor inválido: {u}")
         patch["upstreams"] = ups
+    if "client_qps" in patch:
+        patch["client_qps"] = max(0, min(100000, int(patch["client_qps"] or 0)))
+    if "rate_exempt" in patch:
+        import ipaddress as _ip
+        try:
+            patch["rate_exempt"] = [str(_ip.ip_address(x.strip())) for x in patch["rate_exempt"] if str(x).strip()][:20]
+        except ValueError:
+            raise HTTPException(400, "IP inválida en la lista de reenviadores")
     if patch.get("strategy") and patch["strategy"] not in ("failover", "fastest", "parallel"):
         raise HTTPException(400, "Estrategia inválida")
     c.settings.update("dns", patch)

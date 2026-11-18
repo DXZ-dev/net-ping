@@ -115,6 +115,7 @@ class Context:
         self.dns.on_usage = self.family.record
         self.dns.on_answer = self.classifier.on_answer
         self.dns.on_flood = self._dns_flood
+        self.dns.rate_exempt = self._dns_rate_exempt
         from .security import ArpGuard
         self.arpguard = ArpGuard(self)
         self.devices.on_neigh = self.arpguard.observe
@@ -148,6 +149,12 @@ class Context:
             row = (row[0], h(row[1]), *row[2:8])
             mac = h(mac) if mac else None
         self.db.log_query((*row[:8], mac))
+
+    def _dns_rate_exempt(self, ip: str) -> bool:
+        """Reenviadores (router del proveedor, Pi-hole, otro DNS) agrupan las consultas de muchos equipos."""
+        if ip == self.devices.gateway:
+            return True
+        return ip in set((self.settings.get("dns") or {}).get("rate_exempt") or [])
 
     def _dns_flood(self, ip: str, qps: int) -> None:
         dev = self.devices.devices.get(self.devices.ip_to_mac.get(ip, ""), {}) if hasattr(self.devices, "ip_to_mac") else {}

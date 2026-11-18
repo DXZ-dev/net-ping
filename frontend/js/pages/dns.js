@@ -24,7 +24,12 @@ export async function render(el, app) {
       ${toggle("prefer_ipv4", s.prefer_ipv4, 'id="v4pref"')}</div>
       <div class="opt mt" style="padding:0;border:0"><div class="t"><b>${ico("shield")} Bloquear rastreadores camuflados (CNAME)</b>
       <span>Algunos rastreadores se esconden bajo un subdominio de la propia web (metrics.tienda.com → rastreador). Bipon mira a dónde apunta de verdad y lo bloquea. Lo que permitas a mano se respeta.</span></div>
-      ${toggle("cname_check", s.cname_check !== false, 'id="cnamechk"')}</div></div>
+      ${toggle("cname_check", s.cname_check !== false, 'id="cnamechk"')}</div>
+      <div class="opt mt" style="padding:0;border:0"><div class="t"><b>${ico("activity")} Límite de consultas por equipo</b>
+      <span>Un equipo infectado o una app en bucle no puede saturar el DNS de toda la casa. El router del proveedor está exento; añade aquí otros reenviadores (p. ej. un Pi-hole que use a Bipon).</span></div></div>
+      <div class="form-grid mt"><label class="field">Consultas por segundo por equipo (0 = sin límite)<input type="number" id="cqps" min="0" value="${s.client_qps ?? 200}"></label>
+        <label class="field">Reenviadores exentos (IP, separadas por comas)<input id="rexempt" value="${esc((s.rate_exempt || []).join(", "))}" placeholder="192.168.18.102"></label></div>
+      <button class="btn sm mt" id="rl-save">${ico("check")}Guardar</button></div>
 
     <div class="card mb">
       <header><h2>${ico("zap")}Optimizador de latencia</h2>
@@ -86,6 +91,7 @@ export async function render(el, app) {
       </div>
     </div>`;
 
+  el.querySelector("#rl-save").onclick = (e) => busy(e.currentTarget, () => api.put("/dns", { client_qps: Number(el.querySelector("#cqps").value), rate_exempt: el.querySelector("#rexempt").value.split(/[\s,]+/).filter(Boolean) })).then(() => toast("Guardado")).catch(() => {});
   el.querySelector("#cnamechk").onchange = (e) => api.put("/dns", { cname_check: e.target.checked }).then(() => toast("Guardado")).catch(toastErr);
   el.querySelector("#v4pref").onchange = (e) => api.put("/dns", { prefer_ipv4: e.target.checked })
     .then(() => toast(e.target.checked ? "Preferencia IPv4 activada para toda la red" : "IPv4 e IPv6 normales de nuevo")).catch((err) => { e.target.checked = !e.target.checked; toastErr(err); });

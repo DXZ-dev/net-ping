@@ -1,6 +1,10 @@
 // Diccionario español → inglés para el traductor del DOM (i18n.js).
 // Las claves son los textos exactos (recortados) que muestran las páginas.
 export const EN = {
+  "Límite de consultas por equipo": "Per-device query limit",
+  "Un equipo infectado o una app en bucle no puede saturar el DNS de toda la casa. El router del proveedor está exento; añade aquí otros reenviadores (p. ej. un Pi-hole que use a Bipon).": "An infected device or a looping app cannot overload the DNS for the whole house. The ISP router is exempt; add other forwarders here (e.g. a Pi-hole that uses Bipon).",
+  "Consultas por segundo por equipo (0 = sin límite)": "Queries per second per device (0 = no limit)",
+  "Reenviadores exentos (IP, separadas por comas)": "Exempt forwarders (IPs, comma-separated)",
   "Protección contra suplantación del router (ARP)": "Router impersonation protection (ARP)",
   "Alertas": "Alerts",
   "Sin incidentes": "No incidents",

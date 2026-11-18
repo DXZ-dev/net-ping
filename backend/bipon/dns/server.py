@@ -99,6 +99,7 @@ class DNSServer:
         self._buckets: dict[str, list[float]] = {}
         self.flooding: dict[str, float] = {}
         self.on_flood = None  # callback(ip, qps) — aviso, como mucho una vez cada 10 min por equipo
+        self.rate_exempt = lambda ip: False  # el router o un Pi-hole que reenvían por toda la casa no se limitan
         self.local: dict[tuple[str, int], list[str]] = {}
         self.cf = {"enabled": False, "domain": "", "server": ""}
         # métricas en memoria
@@ -247,7 +248,7 @@ class DNSServer:
         t0 = time.perf_counter()
         if client_ip.startswith("::ffff:"):
             client_ip = client_ip[7:]
-        if self.client_qps and client_ip not in ("127.0.0.1", "::1") and not self._take(client_ip):
+        if self.client_qps and client_ip not in ("127.0.0.1", "::1") and not self.rate_exempt(client_ip) and not self._take(client_ip):
             if tcp:
                 try:
                     r = DNSRecord.parse(data).reply()
