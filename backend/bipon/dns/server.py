@@ -92,6 +92,7 @@ class DNSServer:
         self.prefer_ipv4 = False
         self.cname_check = True  # bloquea rastreadores camuflados tras un CNAME  # filtra AAAA (y HTTPS/SVCB con pistas IPv6): los equipos usan IPv4
         self.prefetch = True
+        self.on_answer = None  # callback(nombre, respuesta) para clasificar tráfico por DNS
         self.local: dict[tuple[str, int], list[str]] = {}
         self.cf = {"enabled": False, "domain": "", "server": ""}
         # métricas en memoria
@@ -254,6 +255,11 @@ class DNSServer:
                 trunc.header.tc = 1
                 out = trunc.pack()
 
+        if self.on_answer is not None and status not in BLOCKED_STATUSES and qtype == QTYPE.A:
+            try:
+                self.on_answer(name, out)  # clasificación de tráfico (streaming, descargas) para la prioridad
+            except Exception:  # pragma: no cover
+                pass
         elapsed = (time.perf_counter() - t0) * 1000
         self.total += 1
         self._cur_count += 1

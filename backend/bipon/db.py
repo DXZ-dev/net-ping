@@ -189,6 +189,21 @@ CREATE TABLE IF NOT EXISTS config_profiles (
     data TEXT NOT NULL,
     auto INTEGER DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS wan_events (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    wan TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    message TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_wan_events_ts ON wan_events(ts);
+CREATE TABLE IF NOT EXISTS traces (
+    id INTEGER PRIMARY KEY,
+    ts REAL NOT NULL,
+    target TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_traces_ts ON traces(ts);
 """
 
 
@@ -296,6 +311,8 @@ class Database:
             self.conn.execute("DELETE FROM notify_log WHERE ts < ?", (cutoff,))
             self.conn.execute("DELETE FROM anomalies WHERE ts < ?", (cutoff,))
             self.conn.execute("DELETE FROM audit WHERE ts < ?", (cutoff - 335 * 86400,))
+            self.conn.execute("DELETE FROM wan_events WHERE ts < ?", (cutoff - 60 * 86400,))
+            self.conn.execute("DELETE FROM traces WHERE ts < ?", (min(cutoff, time.time() - 14 * 86400),))
             self.conn.execute("DELETE FROM usage WHERE day < date(?, 'unixepoch')", (cutoff,))
         try:
             with self._lock:

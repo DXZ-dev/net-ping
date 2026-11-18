@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Resp
 from . import __version__
 from .api import api, public
 from . import api_ext  # noqa: F401  (registra rutas adicionales)
+from . import api_net  # noqa: F401  (multi-WAN, interfaces, anti-lag, ruta)
 from .config import FRONTEND_DIR, WEB_HOST, WEB_PORT
 from .core import Context
 

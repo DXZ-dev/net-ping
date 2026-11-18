@@ -68,6 +68,14 @@ class Context:
         self.sync = SyncManager(self)
         self.wifi = WifiManager(self)
         self.router = RouterManager(self)
+        from .multiwan import MultiWAN
+        self.multiwan = MultiWAN(self)
+        from .qos import Classifier
+        from .trace import Tracer
+        self.classifier = Classifier(self)
+        from .ifaces import Interfaces
+        self.ifaces = Interfaces(self)
+        self.tracer = Tracer(self)
         from .liverates import LiveRates
         self.rates = LiveRates(self)
         from .speedctl import SpeedControl
@@ -105,6 +113,7 @@ class Context:
         self.dns.on_query = self._log_query
         self.dns.on_client = self.devices.track_client
         self.dns.on_usage = self.family.record
+        self.dns.on_answer = self.classifier.on_answer
         self.dns.on_threat = self.security.threat_hit
         self.dns.name_lookup = self.dhcp.lookup_name
         self.devices.family = self.family
@@ -199,6 +208,10 @@ class Context:
 
     async def start(self) -> None:
         self.lists.seed_defaults()
+        try:
+            await self.ifaces.apply_all()  # VLAN e IP guardadas en «Interfaces de red»
+        except Exception as exc:  # pragma: no cover
+            log.warning("interfaces: %s", exc)
         await self.unbound.start()
         self.apply_dns_settings()
         self.apply_blocking()
@@ -240,6 +253,8 @@ class Context:
         self._bg(self.sync.loop(), "sincronización")
         self._bg(self.wifi.loop(), "wifi")
         self._bg(self.router.loop(), "router")
+        self._bg(self.multiwan.loop(), "multi-WAN")
+        self._bg(self.tracer.loop(), "ruta salto a salto")
         self._bg(self.rates.loop(), "velocidad en vivo")
         self._bg(self.lag.loop(), "vigilante de lag")
         self._bg(self.cacheguard.loop(), "guardián de caché")
