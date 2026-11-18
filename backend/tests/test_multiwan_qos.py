@@ -251,3 +251,39 @@ def test_trace_silent_destination_and_single_lost_probe_are_not_blamed():
     assert r["culprit"] is None and r["silent_tail"] and "no responde" in r["verdict"]
     lossy = _hops(("192.168.18.1", 0, 1.0, None), ("181.1.1.1", 30, 6.0, 6400), ("181.1.2.1", 35, 7.0, 6400), ("1.1.1.1", 30, 8.0, 13335))
     assert analyze(lossy, 6400)["loss_hop"] == 2
+
+
+def test_dns_rate_limit_per_client():
+    from bipon.dns.server import DNSServer
+    srv = DNSServer.__new__(DNSServer)
+    srv.client_qps, srv.client_burst, srv._buckets, srv.flooding = 10, 20, {}, {}
+    flagged = []
+    srv.on_flood = lambda ip, q: flagged.append(ip)
+    ok = sum(srv._take("192.168.18.66") for _ in range(100))
+    assert 20 <= ok <= 22 and flagged == ["192.168.18.66"]  # ráfaga permitida, luego limitado y avisado una vez
+    assert srv._take("192.168.18.67")  # los demás equipos no se ven afectados
+
+
+def test_device_rule_with_bad_mac_never_reaches_firewall():
+    mw, ctx, _ = make_mw("failover", device_rules={"aa:bb:cc:dd:ee:ff": "w2", "x } ; flush ruleset ; {": "w2"})
+    assert list(ctx.settings["multiwan"]["device_rules"]) == ["aa:bb:cc:dd:ee:ff"]
+
+
+def test_arp_guard_detects_router_impersonation():
+    from bipon.security import ArpGuard
+    events, notes = [], []
+    devs = Obj(devices={"66:66:66:66:66:66": {"ip": "192.168.18.66", "name": "Portátil raro"}}, gateway="192.168.18.1", self_ip="192.168.18.205")
+    ctx = Obj(settings=Settings({}), devices=devs, db=Obj(event=lambda *a: events.append(a[2])),
+              notify=Obj(emit=lambda *a, **k: notes.append(a[1])))
+    g = ArpGuard(ctx)
+    g.own_macs = lambda: {"02:00:00:00:00:01"}
+    g.observe("192.168.18.1", "aa:aa:aa:aa:aa:01")      # aprende la MAC real del router
+    g.observe("192.168.18.1", "aa:aa:aa:aa:aa:01")
+    assert not events
+    g.observe("192.168.18.1", "66:66:66:66:66:66")      # otro equipo de la red se hace pasar por el router
+    assert events and "Portátil raro" in events[-1] and notes == ["Posible suplantación del router (ARP)"]
+    g.observe("192.168.18.1", "66:66:66:66:66:66")      # no repite el aviso
+    assert len(events) == 1
+    g.observe("192.168.18.205", "77:77:77:77:77:77")    # alguien usa la IP de Bipon
+    assert "IP de Bipon" in events[-1]
+    assert g.accept("192.168.18.1") and g.status()["known"]["192.168.18.1"] == "66:66:66:66:66:66"

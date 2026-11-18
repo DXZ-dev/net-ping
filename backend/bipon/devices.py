@@ -69,6 +69,7 @@ class DeviceManager:
         self.family = None  # FamilyManager (tiempo de pantalla), lo asigna el contexto
         self.listeners: set[asyncio.Queue] = set()
         self._last_wake: dict[str, float] = {}
+        self.on_neigh = None  # callback(ip, mac): guardián ARP
         self._last_seen_arp: dict[str, float] = {}
         self.last_sweep = 0.0
         self.on_new_device = None
@@ -414,6 +415,11 @@ class DeviceManager:
         for n in neigh:
             if n["state"] in ("FAILED", "INCOMPLETE"):
                 continue
+            if self.on_neigh is not None and n.get("mac"):
+                try:
+                    self.on_neigh(n["ip"], n["mac"].lower())
+                except Exception:  # pragma: no cover
+                    log.debug("guardián ARP", exc_info=True)
             if n["state"] == "STALE" and now - self.activity.get(n["ip"], 0) > ONLINE_WINDOW:
                 continue
             if self._mark_seen(n["mac"], n["ip"], now):
@@ -463,6 +469,11 @@ class DeviceManager:
                 ip, dev, mac, state = m.groups()
                 if not mac or state in ("FAILED", None) or line.startswith("Deleted"):
                     continue
+                if self.on_neigh is not None:
+                    try:
+                        self.on_neigh(ip, mac.lower())
+                    except Exception:  # pragma: no cover
+                        log.debug("guardián ARP", exc_info=True)
                 if state in ("REACHABLE", "DELAY", "PROBE", "PERMANENT"):
                     if self._mark_seen(mac.lower(), ip, time.time()) and self.last_scan:
                         asyncio.create_task(self._on_new(mac.lower()))

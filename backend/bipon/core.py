@@ -114,6 +114,10 @@ class Context:
         self.dns.on_client = self.devices.track_client
         self.dns.on_usage = self.family.record
         self.dns.on_answer = self.classifier.on_answer
+        self.dns.on_flood = self._dns_flood
+        from .security import ArpGuard
+        self.arpguard = ArpGuard(self)
+        self.devices.on_neigh = self.arpguard.observe
         self.dns.on_threat = self.security.threat_hit
         self.dns.name_lookup = self.dhcp.lookup_name
         self.devices.family = self.family
@@ -144,6 +148,16 @@ class Context:
             row = (row[0], h(row[1]), *row[2:8])
             mac = h(mac) if mac else None
         self.db.log_query((*row[:8], mac))
+
+    def _dns_flood(self, ip: str, qps: int) -> None:
+        dev = self.devices.devices.get(self.devices.ip_to_mac.get(ip, ""), {}) if hasattr(self.devices, "ip_to_mac") else {}
+        who = dev.get("name") or dev.get("hostname") or ip
+        msg = f"{who} hace más de {qps} consultas DNS por segundo: se limitan para proteger la red (¿malware o una app en bucle?)."
+        self.db.event("warning", "seguridad", msg)
+        try:
+            self.notify.emit("anomaly", "Exceso de consultas DNS", msg, key=f"flood:{ip}")
+        except Exception:  # pragma: no cover
+            pass
 
     def _new_device(self, d: dict) -> None:
         if not self.devices.last_scan:  # el primer escaneo descubre toda la red: no se avisa de cada equipo
@@ -190,6 +204,8 @@ class Context:
         self.dns.prefer_ipv4 = bool(d.get("prefer_ipv4", False))
         self.dns.cname_check = bool(d.get("cname_check", True))
         self.dns.prefetch = bool(d.get("prefetch", True))
+        self.dns.client_qps = max(0, int(d.get("client_qps", 200) or 0))
+        self.dns.client_burst = max(50, int(d.get("client_burst", 1000) or 1000))
         self.dns.cf = d.get("conditional_forwarding") or {}
         self.dns.set_local_records(d.get("local_records") or [])
         dom = ((self.settings.get("dhcp") or {}).get("domain") or "lan").lower()

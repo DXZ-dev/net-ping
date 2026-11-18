@@ -11,10 +11,33 @@ def _bad(exc: Exception):
     raise HTTPException(400, str(exc).strip("'"))
 
 
+def ipv6_bypass(c) -> bool:
+    """¿Hay IPv6 global en la red y los equipos no prefieren IPv4? Entonces su tráfico IPv6 va directo al router
+    del proveedor y se salta a Bipon (sin anti-lag, prioridad ni multi-WAN)."""
+    from . import netinfo
+    if (c.settings.get("dns") or {}).get("prefer_ipv4"):
+        return False
+    for itf in netinfo.run_json(["ip", "-j", "-6", "addr", "show", "scope", "global"]) or []:
+        if any(a.get("family") == "inet6" for a in itf.get("addr_info", [])):
+            return True
+    return False
+
+
+@api.post("/net/prefer-ipv4")
+async def prefer_ipv4(request: Request):
+    c = ctx(request)
+    d = c.settings.get("dns") or {}
+    d["prefer_ipv4"] = True
+    c.settings.set("dns", d)
+    c.db.event("info", "dns", "Preferencia IPv4 activada para que todo el tráfico pase por Bipon")
+    return {"ok": True}
+
+
 # ============================================================ multi-WAN
 @api.get("/multiwan")
 async def multiwan_get(request: Request):
-    return ctx(request).multiwan.status()
+    c = ctx(request)
+    return {**c.multiwan.status(), "ipv6_bypass": ipv6_bypass(c)}
 
 
 @api.put("/multiwan")
@@ -120,7 +143,8 @@ async def sqm_get(request: Request):
     last = c.db.one("SELECT ts, download, upload, ping, loaded_ping, bufferbloat, grade FROM speedtests ORDER BY ts DESC LIMIT 1")
     return {"config": cfg, "down": down, "up": up, "source": src, "cake": await qos.has_cake(), "router_enabled": bool(rc.get("enabled")),
             "one_arm": bool(rc.get("wan")) and rc.get("wan") == rc.get("lan"), "last_test": last,
-            "classified": c.classifier.counts, "shaping_enabled": bool((rc.get("shaping") or {}).get("enabled"))}
+            "classified": c.classifier.counts, "shaping_enabled": bool((rc.get("shaping") or {}).get("enabled")),
+            "ipv6_bypass": ipv6_bypass(c)}
 
 
 @api.put("/sqm")
@@ -180,3 +204,17 @@ async def trace_run(request: Request, body: dict = Body(default={})):
         return {"latest": await t.run_all()}
     except (ValueError, RuntimeError) as exc:
         _bad(exc)
+
+
+# ============================================================ guardián ARP
+@api.get("/security/arp")
+async def arp_status(request: Request):
+    return ctx(request).arpguard.status()
+
+
+@api.post("/security/arp/accept")
+async def arp_accept(request: Request, body: dict = Body(...)):
+    ok = ctx(request).arpguard.accept(str(body.get("ip", "")))
+    if not ok:
+        _bad(ValueError("No hay ningún cambio pendiente para esa IP"))
+    return {"ok": True}

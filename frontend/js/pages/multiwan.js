@@ -64,6 +64,9 @@ export async function render(el) {
     const wans = st.wans || [];
     const ups = wans.filter((w) => w.up !== false && w.enabled !== false);
     el.innerHTML = `
+      ${st.ipv6_bypass && st.router_enabled ? `<div class="alert warn mb">${ico("alert")}<div><b>${t("Tu red usa IPv6 y ese tráfico se salta a Bipon")}</b>
+        <p class="small">${t("Con IPv6 los equipos hablan directamente con el router del proveedor, así que ese tráfico no recibe anti-lag, prioridad ni multi-WAN. Activa «Preferir IPv4» para que todo pase por Bipon (las webs y los juegos funcionan igual por IPv4).")}</p>
+        <button class="btn sm mt" id="v4">${ico("check")}${t("Preferir IPv4")}</button></div></div>` : ""}
       ${!st.router_enabled ? `<div class="alert warn mb">${ico("alert")}<div><b>${t("Bipon todavía no es la puerta de enlace")}</b>
         <p class="small">${t("El multi-WAN decide por qué línea sale cada conexión, así que el tráfico tiene que pasar por Bipon. Actívalo en Router y firewall → Asistente de gateway (funciona con un solo cable).")}</p>
         <a class="btn sm mt" href="#/router">${ico("router")}${t("Ir al asistente de gateway")}</a></div></div>` : ""}
@@ -119,6 +122,7 @@ export async function render(el) {
             <li><b>${t("Segunda tarjeta de red:")}</b> ${t("conecta ahí el otro proveedor y elige esa interfaz con puerta de enlace «auto».")}</li></ol>
           <a class="btn sm mt" href="#/interfaces">${ico("network")}${t("Interfaces de red")}</a></div>
       </div>`;
+    el.querySelector("#v4")?.addEventListener("click", (e) => busy(e.currentTarget, () => api.post("/net/prefer-ipv4")).then(async () => { toast(t("Preferencia IPv4 activada")); st = await api.get("/multiwan"); draw(); }).catch(() => {}));
     el.querySelector("#mw-en").onchange = (e) => save({ enabled: e.target.checked }, e.target.checked ? "Multi-WAN activado" : "Multi-WAN desactivado").catch((err) => { toastErr(err); e.target.checked = !e.target.checked; });
     el.querySelectorAll("input[name=mode]").forEach((r) => (r.onchange = () => el.querySelector("#bal").classList.toggle("hidden", r.value !== "balance" || !r.checked)));
     el.querySelector("#save").onclick = (e) => busy(e.currentTarget, () => save({

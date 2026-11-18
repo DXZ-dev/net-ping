@@ -9,7 +9,7 @@ export const subtitle = "Ping bajo aunque alguien descargue: colas inteligentes 
 const GRADE = { "A+": "ok", A: "ok", B: "warn", C: "warn", D: "err", F: "err" };
 
 export async function render(el) {
-  el.innerHTML = `<div id="lag" class="mb"></div><div id="sqm" class="grid g2 mb"></div>`;
+  el.innerHTML = `<div id="v6warn"></div><div id="lag" class="mb"></div><div id="sqm" class="grid g2 mb"></div>`;
   mountLag(el.querySelector("#lag"));
   const box = el.querySelector("#sqm");
 
@@ -18,6 +18,10 @@ export async function render(el) {
     const c = s.config;
     const lt = s.last_test;
     const tune = c.last_tune;
+    el.querySelector("#v6warn").innerHTML = s.ipv6_bypass && s.router_enabled ? `<div class="alert warn mb">${ico("alert")}<div><b>${t("Tu red usa IPv6 y ese tráfico se salta a Bipon")}</b>
+        <p class="small">${t("Con IPv6 los equipos hablan directamente con el router del proveedor, así que ese tráfico no recibe anti-lag, prioridad ni multi-WAN. Activa «Preferir IPv4» para que todo pase por Bipon (las webs y los juegos funcionan igual por IPv4).")}</p>
+        <button class="btn sm mt" id="v4">${ico("check")}${t("Preferir IPv4")}</button></div></div>` : "";
+    el.querySelector("#v4")?.addEventListener("click", (e) => busy(e.currentTarget, () => api.post("/net/prefer-ipv4")).then(() => { toast(t("Preferencia IPv4 activada")); draw(); }));
     box.innerHTML = `
       <div class="card"><header><h2>${ico("gauge")}${t("Anti-lag con la red cargada (SQM)")}</h2>${toggle("sqm-en", c.enabled, 'id="sqm-en"')}</header>
         ${!s.router_enabled ? `<div class="alert warn small mb">${ico("alert")}<div>${t("Necesita que Bipon sea la puerta de enlace (Router y firewall → Asistente de gateway). Sin eso, el tráfico no pasa por Bipon y no se puede ordenar.")}</div></div>` : ""}

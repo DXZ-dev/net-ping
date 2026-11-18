@@ -134,8 +134,15 @@ class RouterManager:
         from . import qos
         lines += qos.dscp_lines(self.ctx, [m for m, _ in consoles], [ip for _, ip in consoles if ip])
         lines.append(f"  set blocked_macs {{ type ether_addr; {('elements = { ' + ', '.join(blocked_macs) + ' };') if blocked_macs else ''} }}")
+        lines += self._input_lines(dns_port)
         lines.append("  chain forward {")
         lines.append("    type filter hook forward priority -10; policy accept;")
+        lines.append("    ct state invalid counter drop comment \"paquetes inválidos\"")
+        wan_ifs = [i for i in dict.fromkeys([c.get("wan"), *(mw.wan_ifaces() if mw is not None else [])]) if i]
+        if wan_ifs:
+            ifs = "{ " + ", ".join(f'"{i}"' for i in wan_ifs) + " }"
+            # MSS al MTU real de la salida: evita cortes y webs que «se quedan cargando» con módems 4G/PPPoE (MTU < 1500)
+            lines.append(f"    oifname {ifs} tcp flags syn tcp option maxseg size set rt mtu")
         lines.append("    ether saddr @blocked_macs counter drop comment \"Internet bloqueado (control parental)\"")
         for z in c.get("zones", []):
             net = ipaddress.ip_interface(z["address"]).network
@@ -182,6 +189,40 @@ class RouterManager:
         lines.append("  }")
         lines.append("}")
         return "\n".join(lines) + "\n"
+
+    def _input_lines(self, dns_port: int) -> list[str]:
+        """Servicios del propio Bipon (panel, DNS, Unbound, SSH): sólo desde la red local y las VPN.
+        Protege aunque pongas Bipon en la DMZ del router para tener NAT abierto en las consolas."""
+        from .config import WEB_PORT
+        st = self.ctx.settings
+        acc = (st.get("access") or {})
+        tls_cfg = st.get("tls") or {}
+        tcp = {22, int(st.get("unbound.port", 5335) or 5335), 8953}
+        udp = {int(st.get("unbound.port", 5335) or 5335), 67}
+        if acc.get("web", "local_vpn") != "any":
+            tcp |= {int(WEB_PORT), int(tls_cfg.get("port", 8443) or 8443)}
+        if acc.get("dns", "local_vpn") not in ("any", "custom"):
+            tcp |= {int(dns_port), int(tls_cfg.get("dot_port", 853) or 853)}
+            udp |= {int(dns_port)}
+        v6 = ["fe80::/10", "fc00::/7"]
+        for itf in netinfo.run_json(["ip", "-j", "-6", "addr", "show", "scope", "global"]) or []:
+            for a in itf.get("addr_info", []):
+                try:
+                    v6.append(str(ipaddress.ip_interface(f"{a['local']}/{a['prefixlen']}").network))
+                except Exception:
+                    pass
+        tl = ", ".join(str(p) for p in sorted(tcp))
+        ul = ", ".join(str(p) for p in sorted(udp))
+        v6s = ", ".join(dict.fromkeys(v6))
+        return ["  chain input {",
+                "    type filter hook input priority filter; policy accept;",
+                "    ct state established,related accept",
+                "    iif \"lo\" accept",
+                f"    ip saddr != {PRIVATE} tcp dport {{ {tl} }} counter drop comment \"Internet → servicios de Bipon\"",
+                f"    ip saddr != {PRIVATE} udp dport {{ {ul} }} counter drop comment \"Internet → servicios de Bipon\"",
+                f"    ip6 saddr != {{ {v6s} }} tcp dport {{ {tl} }} counter drop",
+                f"    ip6 saddr != {{ {v6s} }} udp dport {{ {ul} }} counter drop",
+                "  }"]
 
     @staticmethod
     def _iface_net(iface: str | None) -> str | None:

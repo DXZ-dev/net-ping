@@ -41,6 +41,7 @@ log = logging.getLogger("bipon.multiwan")
 MARK_BASE = 200
 MAX_WANS = 8
 IFACE_RE = re.compile(r"^[a-zA-Z0-9_.@-]{1,15}$")
+MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 PRIVATE = "{ 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 224.0.0.0/4 }"
 
 # Puertos UDP de juegos y llamadas (conexiones nuevas → la línea con menos ping y prioridad DSCP)
@@ -151,7 +152,8 @@ class MultiWAN:
             raise ValueError("Modo inválido")
         if c.get("balance_by") not in ("device", "connection"):
             raise ValueError("Reparto inválido")
-        c["device_rules"] = {str(k).lower(): v for k, v in (c.get("device_rules") or {}).items() if v in ids}
+        c["device_rules"] = {str(k).lower(): v for k, v in (c.get("device_rules") or {}).items()
+                             if v in ids and MAC_RE.match(str(k).lower())}  # la MAC va al firewall: sólo formato válido
         c["targets"] = [t for t in (c.get("targets") or []) if re.match(r"^[0-9.]{7,15}$", str(t))][:5] or ["1.1.1.1", "8.8.8.8"]
         c["interval"] = max(1, min(30, int(c.get("interval") or 2)))
         c["fail_after"] = max(2, min(20, int(c.get("fail_after") or 3)))

@@ -77,9 +77,14 @@ class Gateway:
             else "Sin conntrack: las conexiones abiertas tardan en cortarse", None if shutil.which("conntrack") else "warn")
         add("tc", bool(shutil.which("tc")), "Control de tráfico (tc)", "Disponible: límites de velocidad" if shutil.which("tc") else "Sin tc: no habrá límites de velocidad",
             None if shutil.which("tc") else "warn")
-        fwd_ok = os.access("/proc/sys/net/ipv4/ip_forward", os.W_OK)
-        add("forward", fwd_ok, "Reenvío de paquetes", "Se puede activar" if fwd_ok else
-            "Este sistema no permite activar ip_forward (en Docker usa network_mode: host y cap NET_ADMIN; en LXC actívalo en el host)")
+        try:
+            fwd_on = open("/proc/sys/net/ipv4/ip_forward").read().strip() == "1"
+        except OSError:
+            fwd_on = False
+        fwd_ok = fwd_on or os.access("/proc/sys/net/ipv4/ip_forward", os.W_OK)
+        add("forward", fwd_ok, "Reenvío de paquetes", "Ya activo" if fwd_on else "Se puede activar" if fwd_ok else
+            "Este sistema no deja activar el reenvío desde dentro. En Docker, actívalo en el equipo anfitrión: "
+            "«sysctl -w net.ipv4.ip_forward=1» (y añádelo a /etc/sysctl.d para que dure). En un LXC, en el host Proxmox.")
         virt = _virt()
         if virt == "lxc":
             add("lxc", True, "Contenedor LXC", "Funciona; el script de Proxmox ya carga en el host los módulos necesarios (nftables, conntrack, HTB, CAKE).", "warn")

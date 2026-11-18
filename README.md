@@ -291,6 +291,10 @@ Con Bipon como puerta de enlace, *Conexión → Multi-WAN* añade más líneas d
 - Por defecto el panel y el DNS sólo responden a la **red local + VPN** (*Usuarios y acceso → Acceso local/externo*). **No expongas los puertos 8080 ni 53 a Internet.**
 - Las configuraciones VPN importadas rechazan scripts (`PostUp`, `up`…); las claves privadas se guardan con permisos 600.
 - El modo router aplica cambios con **reversión automática a los 60 s** si no los confirmas.
+- **Firewall de entrada**: con Bipon de puerta de enlace, el panel, el DNS, Unbound y el SSH solo responden a la red local y a las VPN, aunque pongas Bipon en la **DMZ** del router para tener NAT abierto.
+- **Límite de consultas DNS por equipo** (200/s, ráfaga 1000): un equipo infectado o una app en bucle no satura el DNS de toda la casa; se avisa por Telegram.
+- **Protección contra suplantación del router (ARP)**: recuerda la MAC del router y avisa si otro equipo intenta hacerse pasar por él o por Bipon.
+- **DNS rebinding** bloqueado, **paquetes inválidos** descartados y **MSS** ajustado al MTU de cada línea (módems 4G/PPPoE).
 
 ---
 

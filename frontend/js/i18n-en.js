@@ -1,6 +1,20 @@
 // Diccionario español → inglés para el traductor del DOM (i18n.js).
 // Las claves son los textos exactos (recortados) que muestran las páginas.
 export const EN = {
+  "Protección contra suplantación del router (ARP)": "Router impersonation protection (ARP)",
+  "Alertas": "Alerts",
+  "Sin incidentes": "No incidents",
+  "Bipon recuerda la MAC de tu router y avisa si otro equipo intenta hacerse pasar por él (o por Bipon) para espiar el tráfico o meter lag a toda la casa.": "Bipon remembers your router's MAC and warns you if another device tries to impersonate it (or Bipon) to spy on traffic or add lag to the whole house.",
+  "Aprendiendo la MAC del router…": "Learning the router's MAC…",
+  "El router": "The router",
+  "responde con otra MAC": "answers with another MAC",
+  "Si acabas de cambiar de router, confírmalo; si no, revisa qué equipo es.": "If you just replaced your router, confirm it; otherwise check which device it is.",
+  "Es mi router nuevo": "It's my new router",
+  "IPv6 que se salta a Bipon": "IPv6 bypassing Bipon",
+  "Tu red usa IPv6 y ese tráfico se salta a Bipon": "Your network uses IPv6 and that traffic bypasses Bipon",
+  "Con IPv6 los equipos hablan directamente con el router del proveedor, así que ese tráfico no recibe anti-lag, prioridad ni multi-WAN. Activa «Preferir IPv4» para que todo pase por Bipon (las webs y los juegos funcionan igual por IPv4).": "With IPv6, devices talk straight to the ISP router, so that traffic gets no anti-lag, priority or multi-WAN. Enable “Prefer IPv4” so everything goes through Bipon (websites and games work the same over IPv4).",
+  "Preferir IPv4": "Prefer IPv4",
+  "Preferencia IPv4 activada": "IPv4 preference enabled",
   "Todavía no hay dispositivos detectados.": "No devices detected yet.",
   "Sin vigilar": "Not monitored",
   "Activa el multi-WAN para vigilar esta línea.": "Enable Multi-WAN to monitor this line.",

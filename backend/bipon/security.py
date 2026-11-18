@@ -258,3 +258,98 @@ class SecurityManager:
         return {"config": self.cfg(), "anomalies": rows, "last_run": self.last_run,
                 "geo": {"loaded": self.geo.loaded, "ranges": len(self.geo.starts), "updated": self.geo.updated},
                 "countries": COUNTRY_NAMES, "risky_tlds": RISKY_TLDS}
+
+
+class ArpGuard:
+    """Detecta suplantación ARP: otro equipo que se hace pasar por el router (o por Bipon) para espiar o
+    meter lag a toda la casa (ataque «man in the middle»). Recuerda la MAC del router y avisa si cambia.
+    No bloquea nada por su cuenta: un router nuevo también cambia de MAC (se acepta solo si la nueva se
+    mantiene 1 h y la antigua desaparece)."""
+
+    def __init__(self, ctx):
+        self.ctx = ctx
+        self.alerts: list[dict] = []
+        self._pending: dict[str, dict] = {}
+        self._last_alert: dict[str, float] = {}
+
+    def _known(self) -> dict:
+        return dict((self.ctx.settings.get("arp_guard") or {}).get("macs") or {})
+
+    def _save(self, macs: dict) -> None:
+        cfg = dict(self.ctx.settings.get("arp_guard") or {})
+        cfg["macs"] = macs
+        self.ctx.settings.set("arp_guard", cfg, notify=False)
+
+    def protected_ips(self) -> set[str]:
+        ips = {self.ctx.devices.gateway} if self.ctx.devices.gateway else set()
+        mw = getattr(self.ctx, "multiwan", None)
+        if mw is not None:
+            for w in mw.cfg().get("wans", []):
+                if w.get("gateway") and w["gateway"] != "auto":
+                    ips.add(w["gateway"])
+        return {i for i in ips if i}
+
+    def own_macs(self) -> set[str]:
+        from . import netinfo
+        return {(i.get("mac") or "").lower() for i in netinfo.interfaces() if i.get("mac")}
+
+    def observe(self, ip: str, mac: str) -> None:
+        mac = (mac or "").lower()
+        if not ip or not mac or mac in ("00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff"):
+            return
+        devs = self.ctx.devices
+        if ip == devs.self_ip and mac not in self.own_macs():
+            self._alert(ip, mac, None, "Otro equipo está usando la IP de Bipon (conflicto de IP o suplantación).")
+            return
+        if ip not in self.protected_ips():
+            return
+        known = self._known()
+        if ip not in known:
+            known[ip] = mac
+            self._save(known)
+            return
+        if known[ip] == mac:
+            self._pending.pop(ip, None)
+            return
+        p = self._pending.setdefault(ip, {"mac": mac, "since": time.time()})
+        if p["mac"] != mac:
+            p.update(mac=mac, since=time.time())
+        other_ip = next((d.get("ip") for m, d in devs.devices.items() if m == mac and d.get("ip") and d["ip"] != ip), None)
+        if time.time() - p["since"] > 3600 and not other_ip and known[ip] not in devs.devices:
+            known[ip] = mac  # cambio estable y la MAC anterior ya no existe: router sustituido
+            self._save(known)
+            self._pending.pop(ip, None)
+            self.ctx.db.event("info", "seguridad", f"El router {ip} ahora tiene la MAC {mac} (equipo sustituido)")
+            return
+        who = devs.devices.get(mac, {})
+        name = who.get("name") or who.get("hostname") or who.get("vendor") or mac
+        detail = (f"El equipo «{name}» ({other_ip}) está respondiendo como si fuera el router {ip}." if other_ip else
+                  f"El router {ip} responde con otra MAC ({mac}; la habitual es {known[ip]}).")
+        self._alert(ip, mac, known[ip], detail + " Posible ataque «man in the middle» o un router nuevo.")
+
+    def _alert(self, ip: str, mac: str, expected: str | None, msg: str) -> None:
+        key = f"{ip}:{mac}"
+        if time.time() - self._last_alert.get(key, 0) < 1800:
+            return
+        self._last_alert[key] = time.time()
+        self.alerts.insert(0, {"ts": time.time(), "ip": ip, "mac": mac, "expected": expected, "message": msg})
+        del self.alerts[50:]
+        self.ctx.db.event("warning", "seguridad", msg)
+        log.warning("ARP: %s", msg)
+        try:
+            self.ctx.notify.emit("anomaly", "Posible suplantación del router (ARP)", msg, key=f"arp:{key}")
+        except Exception:  # pragma: no cover
+            pass
+
+    def accept(self, ip: str) -> bool:
+        """El usuario confirma que es su router nuevo."""
+        p = self._pending.pop(ip, None)
+        if not p:
+            return False
+        known = self._known()
+        known[ip] = p["mac"]
+        self._save(known)
+        return True
+
+    def status(self) -> dict:
+        return {"known": self._known(), "pending": self._pending, "alerts": self.alerts}

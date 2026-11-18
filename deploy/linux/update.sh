@@ -4,6 +4,7 @@
 set -euo pipefail
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BRANCH="${BIPON_BRANCH:-main}"
+[[ "$BRANCH" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]{0,99}$ ]] || { echo "Rama inválida: $BRANCH"; exit 1; }
 cd "$SRC"
 echo "[$(date -Is)] Actualizando Bipon Net (rama $BRANCH) en $SRC"
 GIT=(git)

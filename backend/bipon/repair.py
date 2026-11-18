@@ -216,7 +216,8 @@ async def check_shaping(c) -> dict:
         return _step("shaping", name, "skip", "No aplica")
     limited = any(d.get("limit_down") or d.get("limit_up") for d in c.devices.devices.values())
     _, out = await c.router._tc("qdisc", "show", "dev", lan)
-    if "htb" in out and not limited:
+    from . import qos
+    if "htb" in out and not limited and not qos.cfg(c).get("enabled"):
         await c.router._tc("qdisc", "del", "dev", lan, "root")
         await c.router._tc("qdisc", "del", "dev", lan, "ingress")
         return _step("shaping", name, "fixed", "Había colas sin ningún límite activo: eliminadas (menos latencia)")
@@ -263,8 +264,33 @@ async def check_latency(c) -> dict:
     return _step("latency", name, "ok", "; ".join(parts) or "sin medición")
 
 
+async def check_ipv6_bypass(c) -> dict:
+    name = "IPv6 que se salta a Bipon"
+    if not c.router.cfg().get("enabled"):
+        return _step("ipv6", name, "skip", "Bipon no es la puerta de enlace")
+    from .api_net import ipv6_bypass
+    if ipv6_bypass(c):
+        return _step("ipv6", name, "warn", "Tu red tiene IPv6: ese tráfico va directo al router y no recibe anti-lag ni multi-WAN. "
+                                            "Activa «Preferir IPv4» en DNS o en Anti-lag.")
+    return _step("ipv6", name, "ok", "Todo el tráfico pasa por Bipon")
+
+
+async def check_multiwan(c) -> dict:
+    name = "Multi-WAN"
+    mw = getattr(c, "multiwan", None)
+    if mw is None or not mw.active:
+        return _step("multiwan", name, "skip", "Desactivado")
+    notes = await mw.sync_routes()
+    ups = mw.up_wans()
+    if not ups:
+        return _step("multiwan", name, "warn", "Ninguna línea responde")
+    if notes:
+        return _step("multiwan", name, "warn", "; ".join(notes)[:200])
+    return _step("multiwan", name, "ok", f"{len(ups)}/{len(mw.wans())} líneas activas; rutas comprobadas")
+
+
 STEPS = [check_database, check_unbound, check_upstreams, check_dns_server, check_blocklists, check_cache,
-         check_firewall, check_shaping, check_disk, check_tasks, check_latency]
+         check_firewall, check_multiwan, check_shaping, check_ipv6_bypass, check_disk, check_tasks, check_latency]
 
 
 async def run(c) -> dict:
