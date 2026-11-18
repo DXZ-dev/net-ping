@@ -119,8 +119,14 @@ class Scheduler:
         anomalies = db.scalar("SELECT COUNT(*) FROM anomalies WHERE ts>=?", (start,)) or 0
         new_devices = db.query("SELECT mac, ip, hostname, vendor, first_seen FROM devices WHERE first_seen>=? ORDER BY first_seen", (start,))
         threats = db.scalar("SELECT COUNT(*) FROM queries WHERE ts>=? AND status=2 AND reason LIKE '%seguridad%'", (start,)) or 0
+        lag_spikes = db.scalar("SELECT COUNT(*) FROM events WHERE ts>=? AND category='lag'", (start,)) or 0
+        quarantined = db.scalar("SELECT COUNT(*) FROM events WHERE ts>=? AND message LIKE '%cuarentena%'", (start,)) or 0
+        grade = db.one("SELECT grade, bufferbloat, loaded_ping FROM speedtests WHERE ts>=? AND grade IS NOT NULL ORDER BY ts DESC LIMIT 1", (start,))
+        wan = self.ctx.multiwan.uptime(days) if getattr(self.ctx, "multiwan", None) and self.ctx.multiwan.cfg().get("enabled") else []
+        trace = self.ctx.tracer.summary(days) if getattr(self.ctx, "tracer", None) else {}
         data = {
-            "start": start, "end": end, "days": days,
+            "start": start, "end": end, "days": days, "lag_spikes": lag_spikes, "quarantined": quarantined,
+            "bufferbloat": grade, "wan": wan, "trace": trace,
             "queries": {"total": q["total"] or 0, "blocked": q["blocked"] or 0, "clients": q["clients"] or 0,
                         "blocked_pct": round((q["blocked"] or 0) / q["total"] * 100, 1) if q["total"] else 0},
             "top_blocked": top_blocked, "devices": per_client, "screen_time": screen, "top_apps": top_apps,
@@ -134,18 +140,34 @@ class Scheduler:
     @staticmethod
     def report_text(d: dict) -> str:
         q = d["queries"]
-        lines = [f"Consultas: {q['total']:,} · bloqueadas {q['blocked']:,} ({q['blocked_pct']} %)".replace(",", "."),
-                 f"Amenazas bloqueadas: {d['threats']} · anomalías: {d['anomalies']} · dispositivos nuevos: {len(d['new_devices'])}"]
-        sp = d["speed"]
-        if sp.get("n"):
-            lines.append(f"Velocidad media: ↓{sp['down']} / ↑{sp['up']} Mbps · ping {sp['ping']} ms ({sp['n']} tests)")
+        n = lambda v: f"{v:,}".replace(",", ".")  # noqa: E731
+        lines = []
         inet = [c for c in d["connection"] if c["target"] not in ("gateway", "dns")]
         if inet:
-            lines.append(f"Disponibilidad de Internet: {100 - max(c['down'] for c in inet):.2f} % · cortes: {len(d['outages'])}")
+            avg = round(sum(c["latency"] for c in inet) / len(inet), 1)
+            lines.append(f"🎮 Ping medio a Internet: {avg} ms · picos de lag: {d.get('lag_spikes', 0)}")
+            lines.append(f"🌐 Disponibilidad: {100 - max(c['down'] for c in inet):.2f} % · cortes: {len(d['outages'])}")
+        bb = d.get("bufferbloat")
+        if bb and bb.get("grade"):
+            lines.append(f"📶 Lag con la red cargada: nota {bb['grade']}" + (f" (+{bb['bufferbloat']} ms)" if bb.get("bufferbloat") is not None else ""))
+        for w in d.get("wan") or []:
+            lines.append(f"🔀 {w['name']}: {w['outages']} caídas, {round(w['down_s'] / 60)} min sin servicio (el respaldo las cubrió)")
+        tr = (d.get("trace") or {}).get("culprits") or {}
+        if tr:
+            who = max(tr, key=tr.get)
+            lines.append(f"🛰️ Origen del lag más frecuente: {dict(casa='tu red', proveedor='tu proveedor', internet='Internet').get(who, who)} ({tr[who]} veces)")
+        lines.append(f"🚫 Anuncios y rastreadores bloqueados: {n(q['blocked'])} de {n(q['total'])} consultas ({q['blocked_pct']} %)")
+        lines.append(f"🛡️ Amenazas bloqueadas: {d['threats']} · equipos en cuarentena: {d.get('quarantined', 0)} · anomalías: {d['anomalies']}")
+        if d["new_devices"]:
+            names = ", ".join((x.get("hostname") or x.get("vendor") or x.get("ip") or x["mac"]) for x in d["new_devices"][:5])
+            lines.append(f"📱 Dispositivos nuevos: {len(d['new_devices'])} ({names}{'…' if len(d['new_devices']) > 5 else ''})")
+        sp = d["speed"]
+        if sp.get("n"):
+            lines.append(f"⚡ Velocidad media: ↓{sp['down']} / ↑{sp['up']} Mbps · ping {sp['ping']} ms ({sp['n']} tests)")
         if d["screen_time"]:
-            lines.append("Tiempo de Internet (media/día): " + ", ".join(f"{s['name']} {s['avg_day']} min" for s in d["screen_time"][:5]))
+            lines.append("⏱️ Tiempo de Internet (media/día): " + ", ".join(f"{s['name']} {s['avg_day']} min" for s in d["screen_time"][:5]))
         if d["top_apps"]:
-            lines.append("Apps más usadas: " + ", ".join(f"{a['name']} {round(a['minutes'] / 60, 1)} h" for a in d["top_apps"][:5]))
+            lines.append("📊 Apps más usadas: " + ", ".join(f"{a['name']} {round(a['minutes'] / 60, 1)} h" for a in d["top_apps"][:5]))
         return "\n".join(lines)
 
     @staticmethod
@@ -155,7 +177,7 @@ class Scheduler:
         q = d["queries"]
         return f"""<div style="font-family:system-ui,sans-serif;max-width:640px">
 <h2 style="color:#3b82f6">📊 Informe semanal de Bipon Net</h2>
-<p><b>{q['total']:,}</b> consultas · <b>{q['blocked']:,}</b> bloqueadas ({q['blocked_pct']} %) · {d['threats']} amenazas bloqueadas · {d['anomalies']} anomalías</p>
+<p style="white-space:pre-line">{e(Scheduler.report_text(d))}</p>
 <h3>Tiempo de Internet por dispositivo</h3><table>{rows(d['screen_time'], ['name', 'avg_day'])}</table><p style="color:#888">minutos de media al día</p>
 <h3>Apps más usadas (minutos)</h3><table>{rows(d['top_apps'], ['name', 'minutes'])}</table>
 <h3>Dominios más bloqueados</h3><table>{rows(d['top_blocked'], ['domain', 'n'])}</table>

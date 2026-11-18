@@ -73,8 +73,12 @@ def analyze(hops: list[dict], isp_asn: int | None = None) -> dict:
             if h.get("segment") == "?" and h.get("ip") and not _private(h["ip"]):
                 seen_public += 1
                 h["segment"] = "proveedor" if seen_public <= 2 else "internet"
-    resp = [h for h in hops if h.get("avg") is not None]
-    dest = hops[-1] if hops else None
+    # los saltos finales que no responden suelen ser el destino filtrando pings: se analiza hasta el último que responde
+    last = max((i for i, h in enumerate(hops) if h.get("ip")), default=-1)
+    silent_tail = last < len(hops) - 1
+    hops_eff = hops[:last + 1]
+    resp = [h for h in hops_eff if h.get("avg") is not None]
+    dest = hops_eff[-1] if hops_eff else None
     out = {"hops": hops, "dest_ms": dest.get("avg") if dest else None, "dest_loss": dest.get("loss") if dest else None,
            "lag_hop": None, "lag_segment": None, "lag_added": None, "loss_hop": None, "loss_segment": None}
     # aumento de latencia persistente
@@ -88,10 +92,11 @@ def analyze(hops: list[dict], isp_asn: int | None = None) -> dict:
                 break
         prev = h["avg"] if prev is None else max(prev, min(h["avg"], (h["best"] or h["avg"]) * 2))
     # pérdida que empieza en un salto y llega al destino
-    for i, h in enumerate(hops):
-        if h.get("loss", 0) >= 10 and h.get("ip") and all(x.get("loss", 0) >= 10 for x in hops[i:] if x.get("ip")) and dest and dest.get("loss", 0) >= 10:
+    for i, h in enumerate(hops_eff):  # 1 paquete perdido de 10 es ruido: hace falta ≥20 % sostenido hasta el final
+        if h.get("loss", 0) >= 20 and h.get("ip") and all(x.get("loss", 0) >= 20 for x in hops_eff[i:] if x.get("ip")) and dest and dest.get("loss", 0) >= 20:
             out.update(loss_hop=h["hop"], loss_segment=h.get("segment"))
             break
+    out["silent_tail"] = silent_tail
     home = hops[0].get("avg") if hops else None
     if home is not None and home > 8:
         out["verdict"] = f"Tu red local responde lento ({home} ms hasta el router): revisa el cable, el Wi-Fi o la carga del router."
@@ -104,7 +109,8 @@ def analyze(hops: list[dict], isp_asn: int | None = None) -> dict:
                           f"({SEG_LABEL.get(out['lag_segment'] or '?')}) y se mantiene hasta el destino.")
         out["culprit"] = out["lag_segment"]
     else:
-        out["verdict"] = "Ruta limpia: ningún tramo añade lag de forma sostenida."
+        out["verdict"] = "Ruta limpia: ningún tramo añade lag de forma sostenida." + (
+            " (El destino no responde a pings; se analizó hasta el último salto que responde.)" if silent_tail else "")
         out["culprit"] = None
     return out
 

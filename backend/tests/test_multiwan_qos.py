@@ -242,3 +242,12 @@ def test_interface_validation():
             i.validate("eth1", bad)
     with pytest.raises(ValueError):
         i.validate("eth1;rm", {"mode": "dhcp"})
+
+
+def test_trace_silent_destination_and_single_lost_probe_are_not_blamed():
+    hops = _hops(("192.168.18.1", 10, 1.0, None), ("181.1.1.1", 0, 6.0, 6400), ("1.1.1.1", 10, 8.0, 13335)) + \
+        [{"hop": 4, "ip": None, "loss": 100, "avg": None, "best": None, "worst": None, "stdev": None}]
+    r = analyze(hops, 6400)
+    assert r["culprit"] is None and r["silent_tail"] and "no responde" in r["verdict"]
+    lossy = _hops(("192.168.18.1", 0, 1.0, None), ("181.1.1.1", 30, 6.0, 6400), ("181.1.2.1", 35, 7.0, 6400), ("1.1.1.1", 30, 8.0, 13335))
+    assert analyze(lossy, 6400)["loss_hop"] == 2
